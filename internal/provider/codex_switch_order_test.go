@@ -9,10 +9,14 @@ import (
 )
 
 // In order, Codex stays signed in to the account it is on at 98% of its
-// allowance, as the gateway still sends that one requests first, and moves
-// on once it is used up (#530); Smart moves it at 98%, as before. Kept on
-// the first (KeepLogin), it stays however used up that is, and moves on
-// again once that is off (#524).
+// five-hour allowance, as the gateway still sends that one requests first,
+// and moves on once it is used up (#530); Smart moves it at 98%, as before.
+// Kept on the first (KeepLogin), it stays however used up that is, and
+// moves on again once that is off (#524).
+//
+// The five hours are what the sign-in's move is decided on
+// (codex_fivehour.go): a week at 98% does not move it off an account
+// whose five hours are fresh.
 func TestCodexLoginOrderedAndKept(t *testing.T) {
 	home := signIn(t) // me@example.com, acct-1
 	rememberLogins(true)
@@ -23,11 +27,14 @@ func TestCodexLoginOrderedAndKept(t *testing.T) {
 	if err := SetLoginOn("codex", "spare@example.com", true); err != nil {
 		t.Fatal(err)
 	}
+	// the five hours of each account, and its week
 	used := map[string]float64{"acct-work@example.com": 98, "acct-1": 0, "acct-spare@example.com": 20}
+	week := map[string]float64{"acct-work@example.com": 98, "acct-1": 0, "acct-spare@example.com": 0}
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := r.Header.Get("chatgpt-account-id")
 		json.NewEncoder(w).Encode(map[string]any{"plan_type": "plus", "rate_limit": map[string]any{
-			"primary_window":   map[string]any{"used_percent": 0, "limit_window_seconds": 18000},
-			"secondary_window": map[string]any{"used_percent": used[r.Header.Get("chatgpt-account-id")], "limit_window_seconds": 604800}}})
+			"primary_window":   map[string]any{"used_percent": used[acct], "limit_window_seconds": 18000},
+			"secondary_window": map[string]any{"used_percent": week[acct], "limit_window_seconds": 604800}}})
 	}))
 	defer fake.Close()
 	old := CodexBase

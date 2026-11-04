@@ -245,6 +245,13 @@ func renewSaved(ctx context.Context, agent, user string, force bool, stale strin
 		// a switch away saves it afresh from Codex's.
 		return codexTokenRenewing(ctx, codexHome(), stale)
 	}
+	if agent == "codex" && l.Taken != "" {
+		// the account magpie took over from another Codex folder: its
+		// sign-in is magpie's to refresh, in logins.json. The folder it
+		// came from is read, never written, so the two never hold one
+		// refresh token and never sign each other out.
+		return renewTakenCodex(ctx, *l, stale)
+	}
 	if home := codexHeldIn(*l); home != "" {
 		// the same for an account Codex is signed in to in another of
 		// its folders (CODEX_HOME=~/.codex-work): Codex there refreshes

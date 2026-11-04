@@ -24,13 +24,14 @@ import (
 // `magpie accounts project <gemini|antigravity> <email> <project>`,
 // `magpie accounts alias <agent> <email> [<name>|--clear]`
 // `magpie accounts switch-only codex [on|off]`
+// `magpie accounts takeover [profile...]`
 // — the subscriptions magpie remembers, how much of each one's allowance is
 // used, and switching the agent between them.
 func accountsCmd(args []string) error {
 	if len(args) > 1 && args[1] == "discovery" {
 		return accountsDiscoveryCmd(args[2:])
 	}
-	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off]"
+	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off] | magpie accounts takeover [profile...] | magpie accounts order <agent> <email>..."
 	agentID := func(s string) (string, error) {
 		switch strings.ToLower(s) {
 		case "claude", "cc":
@@ -121,6 +122,12 @@ func accountsCmd(args []string) error {
 	}
 	if len(args) > 1 && args[1] == "refresh" {
 		return refreshAccounts(len(args) > 2 && args[2] == "--json")
+	}
+	if len(args) > 1 && args[1] == "takeover" {
+		return takeoverAccounts(args[2:])
+	}
+	if len(args) > 1 && args[1] == "order" {
+		return orderAccounts(args[2:])
 	}
 	if len(args) > 1 && args[1] == "checkin" {
 		return checkinWorkBuddy(len(args) > 2 && args[2] == "--json")
@@ -899,6 +906,99 @@ func switchOnlyCmd(args []string) error {
 		fmt.Println(green.Render("✓"), "magpie only switches Codex's sign-in to an account with room; its requests go straight to OpenAI. A Codex app or session already open stays on its account until it is opened again.")
 	} else {
 		fmt.Println(green.Render("✓"), "with more of its accounts on, Codex's requests go through magpie to fail over between them again")
+	}
+	return nil
+}
+
+// takeoverAccounts: `magpie accounts takeover [profile...]` takes the
+// ChatGPT accounts multicodex holds into magpie: each profile's sign-in is
+// read, the account is kept in logins.json, in use and in the rotation's
+// order, so magpie may switch to the account and turn the accounts over on
+// their five-hour quota.
+//
+// The sign-in stays in the multicodex folder and is refreshed there, as it
+// is for any account another Codex folder keeps: one refresh token, one
+// holder. So multicodex keeps working with the account it had, and no
+// fresh sign-in is ever needed — not now, and not when magpie signs the
+// agent in to the account and back again.
+func takeoverAccounts(args []string) error {
+	names := args
+	if len(names) == 1 && names[0] == "--help" {
+		fmt.Println("usage: magpie accounts takeover [profile...]")
+		fmt.Println("Takes the ChatGPT accounts multicodex holds into magpie, so magpie may switch")
+		fmt.Println("to them and turn them over on their five-hour quota.")
+		fmt.Println("Each sign-in stays in its multicodex folder and is refreshed there: one")
+		fmt.Println("refresh token, one holder. multicodex keeps working with the accounts it")
+		fmt.Println("had, and no fresh sign-in is needed.")
+		return nil
+	}
+	fmt.Println(bold.Render("!"), "magpie takes each account over, to switch to it and to order it.")
+	fmt.Println(" ", muted.Render("Each sign-in stays in its multicodex folder and is refreshed there: multicodex keeps working with the accounts it had, and no fresh sign-in is needed."))
+	ctx, stop := interruptContext()
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	taken, err := provider.TakeOverCodexAccounts(ctx, names)
+	for _, user := range taken {
+		fmt.Println(green.Render("✓"), "took", user, "over")
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Println(faint.Render("  see them: magpie accounts codex"))
+	return nil
+}
+
+// orderAccounts: `magpie accounts order <agent> <email>...` puts the
+// accounts in the order the user names. The order is the one the gateway
+// goes over them in, and the one the sign-in turns them over in: the
+// first account with room takes over, and it takes over again once its
+// allowance starts again.
+//
+// The accounts named are the ones in the order; the ones left out keep
+// their place after them, in the order they were in.
+func orderAccounts(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: magpie accounts order <agent> <email>...")
+	}
+	agent := args[0]
+	switch strings.ToLower(agent) {
+	case "claude", "cc":
+		agent = "claude"
+	case "codex":
+		agent = "codex"
+	default:
+		return fmt.Errorf("%q: only Claude Code's and Codex's accounts can be ordered", agent)
+	}
+	users := make([]string, 0, len(args)-1)
+	for _, a := range args[1:] {
+		u, err := accountNamed(agent, a)
+		if err != nil {
+			return err
+		}
+		users = append(users, u)
+	}
+	// every account of the agent, in the order the user named them, and
+	// the ones left out after them in the order they were in
+	all := provider.Logins(agent)
+	byUser := map[string]int{}
+	for i, l := range all {
+		byUser[strings.ToLower(l.User)] = i
+	}
+	ordered := append([]string{}, users...)
+	for _, l := range all {
+		if !slices.ContainsFunc(users, func(u string) bool { return strings.EqualFold(u, l.User) }) {
+			ordered = append(ordered, l.User)
+		}
+	}
+	if len(ordered) != len(all) {
+		return fmt.Errorf("accounts changed; open the provider and try again")
+	}
+	if err := provider.SetAccountOrder(agent, ordered); err != nil {
+		return err
+	}
+	for i, u := range ordered {
+		fmt.Printf("%d. %s\n", i+1, u)
 	}
 	return nil
 }

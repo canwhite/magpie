@@ -44,6 +44,9 @@ func CodexHomeIn(home string) string {
 // made: in the home folder, and beside CodexHome, a folder whose name
 // starts with "codex" or ".codex", or one folder down in such a folder
 // (~/.codex-profiles/work), that holds auth.json or sessions/.
+// multicodex's own folders are found where it says they are
+// (multicodexHomesIn): its profiles live under ~/multicodex, which no
+// name in the home folder leads to.
 func CodexHomes() []string {
 	home, _ := os.UserHomeDir()
 	return CodexHomesIn(home)
@@ -89,6 +92,9 @@ func CodexHomesIn(home string) []string {
 				}
 			}
 		}
+	}
+	for _, dir := range multicodexHomesIn(home) {
+		add(dir)
 	}
 	return out
 }

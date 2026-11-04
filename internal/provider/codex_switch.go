@@ -192,7 +192,7 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// nothing for it, and a workspace seat at its owner's limit or a spend
 	// cap is held with every window under the share
 	if first != nil && first.On && first.Lapsed == "" {
-		if q, known := u[first.User]; known && q.Error == "" && !q.Held && !usedPast(q, backShare, now) && !capped(first.User, q) {
+		if q, known := u[first.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, backShare, now) && !capped(first.User, q) {
 			return from, first.User, true, true
 		}
 	}
@@ -201,15 +201,33 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// A window whose reset has passed counts as started again (usedPast),
 	// on every account, however its reading came
 	q, known := u[from]
-	if keep || !known || q.Error != "" || !q.Held && !usedPast(q, share, now) && !capped(from, q) {
+	if keep || !known || q.Error != "" || !q.Held && !spentAt(agent, q, share, now) && !capped(from, q) {
 		return "", "", false, false
 	}
 	for _, l := range spares {
-		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !usedPast(q, share, now) && !capped(l.User, q) {
+		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, share, now) && !capped(l.User, q) {
 			return from, l.User, false, true
 		}
 	}
 	return "", "", false, false
+}
+
+// spentAt says whether the account's allowance is used up at share, as the
+// sign-in's move reads it.
+//
+// For Codex the five-hour window is the one that counts (codex_fivehour.go):
+// an account whose week is fresh but whose five hours are gone is spent,
+// and one whose five hours are fresh is not, whatever its week says. The
+// week still removes an account of its own accord, for it is out of both
+// then.
+//
+// Every other subscription keeps the reading it had: any window that
+// stops the account at share.
+func spentAt(agent string, q SubscriptionQuota, share float64, now time.Time) bool {
+	if agent == "codex" {
+		return codexFiveHourSpent(q, share, now) || codexFiveHourOut(q, now)
+	}
+	return usedPast(q, share, now)
 }
 
 // SwitchWhenSpent signs agent in to the next of its accounts when the one

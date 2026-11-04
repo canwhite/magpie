@@ -64,6 +64,10 @@ type Login struct {
 	// home is the other Codex folder a ChatGPT account is signed in to
 	// in, Codex's own there (codexHomeLogins): not one to switch ~/.codex to.
 	home string
+	// taken says the account was taken over from another Codex folder
+	// (codex_takeover.go): it is magpie's own, so the folder it came
+	// from does not keep it out of the rotation.
+	taken bool
 }
 
 type savedLogin struct {
@@ -118,6 +122,12 @@ type savedLogin struct {
 	// magpie last looked: its saved copy is that very sign-in, which
 	// Claude Code's /logout revokes (claudeLoggedOut).
 	Held bool `json:"held,omitempty"`
+	// Taken is set on a ChatGPT account magpie took over from another
+	// Codex folder (codex_takeover.go): the account is magpie's to
+	// switch to and to order, and its sign-in is refreshed in
+	// logins.json. The folder it came from is read, never written, so
+	// the two never hold one refresh token.
+	Taken string `json:"taken,omitempty"`
 	// was is the name a Copilot account read under a new one had in the
 	// file (#1220): its per-account settings are still kept by it, and
 	// move to the new one before the new name is written (renameSettled).
@@ -340,6 +350,14 @@ func upsertLogin(ls []savedLogin, l savedLogin) []savedLogin {
 			l.On = l.On || ls[i].On
 			l.Paused = l.Paused || ls[i].Paused
 			l.Order = ls[i].Order
+			// an account magpie took over from another Codex folder
+			// keeps that mark: the folder is left alone and the sign-in
+			// is magpie's to refresh, whatever read the account since.
+			// A new mark wins over an old one: the account is taken
+			// over now, not kept.
+			if l.Taken == "" {
+				l.Taken = ls[i].Taken
+			}
 			ls[i] = l
 			return ls
 		}
@@ -738,11 +756,25 @@ func codexOtherHomes() []string { return appdir.CodexHomes()[1:] }
 // signed in itself, as it does the one in ~/.codex. The one ~/.codex is
 // signed in to is that one's, wherever else it is too, and an account in
 // two other folders is the first's.
+//
+// An account magpie took over is left out (codex_takeover.go): it is
+// magpie's own, kept in logins.json, and the folder it came from still
+// holds the sign-in as it was, so reading it again would take the account
+// back from magpie.
 func codexHomeLogins(live savedLogin, haveLive bool) []savedLogin {
+	taken := map[string]bool{}
+	for _, l := range readLogins() {
+		if l.Agent == "codex" && codexTakenOver(l) {
+			taken[strings.ToLower(l.User)] = true
+		}
+	}
 	var out []savedLogin
 	for _, home := range codexOtherHomes() {
 		l, ok := codexLoginIn(home)
 		if !ok || haveLive && sameLogin(live, l) || slices.ContainsFunc(out, func(o savedLogin) bool { return sameLogin(o, l) }) {
+			continue
+		}
+		if taken[strings.ToLower(l.User)] {
 			continue
 		}
 		l.Home = home
@@ -754,8 +786,17 @@ func codexHomeLogins(live savedLogin, haveLive bool) []savedLogin {
 // codexHeldIn is the other Codex folder the saved account l is signed in
 // to now, as rememberLogins recorded it in Home: the same login, or the
 // same refresh token. "" when it is in none.
+//
+// An account magpie took over is never held in the folder it came from
+// (codex_takeover.go): magpie owns its sign-in and refreshes it in
+// logins.json, and the folder is read, never written. The folder still
+// holds the sign-in as it was, so without this the account would be
+// renewed there and the two would hold one refresh token.
 func codexHeldIn(l savedLogin) string {
 	if l.Agent != "codex" || l.Home == "" {
+		return ""
+	}
+	if codexTakenOver(l) {
 		return ""
 	}
 	in, ok := codexLoginIn(l.Home)
@@ -993,7 +1034,15 @@ func Logins(agent string) []Login {
 		lg := Login{Agent: l.Agent, User: l.User, Plan: l.Plan, Seen: l.Seen, Active: using, On: using || first || l.On,
 			Paused: (using || first) && pausedOwn(ls, l.Agent, l.User), first: first}
 		if !using && l.Agent == "codex" {
-			lg.home = l.Home
+			// an account magpie took over from another Codex folder is
+			// magpie's alone: its sign-in is refreshed in logins.json,
+			// so the folder it came from does not keep the account out
+			// of the rotation (codex_switch.go).
+			if codexTakenOver(l) {
+				lg.taken = true
+			} else {
+				lg.home = l.Home
+			}
 		}
 		if l.Agent == "claude" {
 			lg.Lapsed = claudeSignedOut(l)
