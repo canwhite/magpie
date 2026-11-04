@@ -35,10 +35,10 @@ const codexFiveHourSpan = 5 * time.Hour
 // account's own window has run for nothing. Moving off at 85% leaves the
 // next account a window's worth of room to be used in.
 //
-// It is below codexBackShare, the share the account comes back at, so the
-// sign-in does not go back and forth at the edge: an account moved off at
-// 85% is back only once it is under codexBackShare, which is further
-// from the edge than the share it was moved off at.
+// It is below what is left of the window when the account comes back
+// (codexBackShare, so 20% left), so the sign-in does not go back and
+// forth at the edge: an account moved off with 15% left is back only
+// once it has 20% left again.
 const codexSwitchLeft = 15
 
 // codexSwitchShare is the share of the five-hour window past which the
@@ -46,9 +46,9 @@ const codexSwitchLeft = 15
 const codexSwitchShare = 100 - codexSwitchLeft
 
 // codexBackShare is the share below which the account the sign-in moved
-// off comes back to: under it there is room again. It is above the share
-// the account is moved off at (codexSwitchLeft), so the two do not
-// overlap.
+// off comes back to: under it there is room again. It is below the share
+// the account is moved off at (codexSwitchShare), so the two do not
+// overlap and the sign-in does not go back and forth at the edge.
 const codexBackShare = 80
 
 // codexFiveHourNames are the names a five-hour window goes by in a

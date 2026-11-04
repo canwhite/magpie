@@ -1729,7 +1729,17 @@ the agent in to the next ticked account, in their order, whose allowance
 is known and under that share. A saved Claude account magpie knows
 nothing of yet (see below) is not moved to. Once the account it moved the
 agent off has every window under 90% again, it signs the agent back in to
-it. *Keep … signed in to* turns this off: the agent stays on the first
+it.
+
+Codex is the exception: it is moved on with 15% of its **five-hour**
+window left, not at 98% and not when the window is used up, so the next
+account has a window's worth of room to be used in. It comes back once
+its five hours have 20% left again, so the two shares do not overlap and
+the sign-in does not go back and forth at the edge. The week is not read
+for this: an account whose week is used up is out of both, and one whose
+week is used up partly is not moved off for it.
+
+*Keep … signed in to* turns this off: the agent stays on the first
 account, or on the account you picked, whatever it has left. It changes nothing in the gateway's routing.
 
 With more than one Codex account on, magpie also sets `openai_base_url`

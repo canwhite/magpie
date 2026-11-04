@@ -19,12 +19,18 @@ package provider
 // the sign-in. In order, the gateway goes to the first until it is used
 // up or refused, so the sign-in moves only once it is used up (#530).
 //
+// Codex is the exception: it moves off its account with 15% of its
+// five-hour window left (codexSwitchLeft), not when it is used up, so
+// the next account has a window's worth of room to be used in. The
+// gateway's own share is unchanged (switchShares).
+//
 // The account it moved from is the one the user made first, and it stays
-// that: once it is no longer low (backShare) the agent is signed back in
-// to it, as Smart gives it requests again then (#408). A switch the user
-// makes meanwhile ends that. With KeepLogin on the subscription, the agent
-// stays signed in to the first, whatever it has left (#524); with
-// KeepLoginAs, to that account, wherever it stands in the order.
+// that: once it is no longer low (backShare, and codexBackShare for
+// Codex) the agent is signed back in to it, as Smart gives it requests
+// again then (#408). A switch the user makes meanwhile ends that. With
+// KeepLogin on the subscription, the agent stays signed in to the first,
+// whatever it has left (#524); with KeepLoginAs, to that account,
+// wherever it stands in the order.
 
 import (
 	"context"
@@ -73,14 +79,31 @@ func loginSwitching(agent string) (share float64, keep bool) {
 	return SpentShare, false
 }
 
+// switchShares are the shares the sign-in's move is decided on: the share
+// the account it is on is moved off at, the share the account it moved off
+// comes back at, and whether it is kept on the first instead (KeepLogin).
+//
+// For Codex they are the five-hour window's own (codex_fivehour.go): the
+// account is moved off with codexSwitchLeft of its window left, so the
+// next account has a window's worth of room to be used in, and it comes
+// back only once it is under codexBackShare, further from the edge than
+// the share it was moved off at, so the two do not overlap and the
+// sign-in does not go back and forth at the edge.
+//
+// Every other subscription keeps the shares it had: the share Smart
+// routing counts an account spent at (loginSwitching's), and backShare.
+func switchShares(agent string) (move, back float64, keep bool) {
+	move, keep = loginSwitching(agent)
+	back = backShare
+	if agent == "codex" {
+		move, back = codexSwitchShare, codexBackShare
+	}
+	return move, back, keep
+}
+
 // backShare is the share below which the account magpie moved the agent
 // off is signed back in to: no longer low, as Smart counts it (the
 // gateway's lowShare), so it doesn't go back and forth at the edge.
-//
-// For Codex it is the five-hour window's own (codexBackShare): the
-// account was moved off at 85% used, and it comes back only once it is
-// under 80%, so the two shares do not overlap and the sign-in does not go
-// back and forth at the edge.
 const backShare = 90
 
 // switchedAgents are the agents whose account magpie moves on.
@@ -180,7 +203,7 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	}
 	// kept on the first, the agent goes back to it at once, however little
 	// that has left (#524)
-	share, keep := loginSwitching(agent)
+	moveAt, backAt, keep := switchShares(agent)
 	if keep && first != nil && first.On && first.Lapsed == "" {
 		return from, first.User, true, true
 	}
@@ -197,11 +220,7 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// nothing for it, and a workspace seat at its owner's limit or a spend
 	// cap is held with every window under the share
 	if first != nil && first.On && first.Lapsed == "" {
-		share := float64(backShare)
-		if agent == "codex" {
-			share = codexBackShare
-		}
-		if q, known := u[first.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, share, now) && !capped(first.User, q) {
+		if q, known := u[first.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, backAt, now) && !capped(first.User, q) {
 			return from, first.User, true, true
 		}
 	}
@@ -210,20 +229,16 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// A window whose reset has passed counts as started again (usedPast),
 	// on every account, however its reading came.
 	//
-	// For Codex the share is the five-hour window's own (codexSwitchShare):
+	// For Codex the share is the five-hour window's own (switchShares):
 	// the sign-in moves off an account that has codexSwitchLeft of it
 	// left, so the next account has a window's worth of room to be used
 	// in.
-	moveShare := share
-	if agent == "codex" {
-		moveShare = codexSwitchShare
-	}
 	q, known := u[from]
-	if keep || !known || q.Error != "" || !q.Held && !spentAt(agent, q, moveShare, now) && !capped(from, q) {
+	if keep || !known || q.Error != "" || !q.Held && !spentAt(agent, q, moveAt, now) && !capped(from, q) {
 		return "", "", false, false
 	}
 	for _, l := range spares {
-		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, moveShare, now) && !capped(l.User, q) {
+		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, moveAt, now) && !capped(l.User, q) {
 			return from, l.User, false, true
 		}
 	}
@@ -242,8 +257,8 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 // The five hours are not read the way the other windows are, though: the
 // sign-in moves off an account that has codexSwitchLeft of them left, so
 // the next account has a window's worth of room to be used in. The caller
-// says which share it means (codexSwitchShare to move off, codexBackShare
-// to come back to).
+// says which share it means (switchShares': codexSwitchShare to move off,
+// codexBackShare to come back to).
 //
 // Every other subscription keeps the reading it had: any window that
 // stops the account at share.
@@ -281,7 +296,7 @@ func SwitchWhenSpent(ctx context.Context, agent string) (string, error) {
 		}
 		r.To = to
 		setLoginReturn(agent, r)
-		share, _ := loginSwitching(agent)
+		share, _, _ := switchShares(agent)
 		log.Printf("%s: %s has used %g%% or more of its allowance; signed it in to %s", agent, from, share, to)
 	}
 	if agent == "codex" {

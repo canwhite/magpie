@@ -80,7 +80,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         "First for now", "First again once it has room",
         "{user} was nearly used up, so magpie signed {agent} in to this one; it goes back to {user} once that has room again",
         "magpie signs {agent} back in to this account once it has room again",
-        "Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is 98% used, and back to the first once that has room again.",
+        "Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have 15% left, and back to the first once that has room again.",
       ].filter((k) => !I18N.zh[k]));
       assert.deepEqual(missing, [], "every string has its Chinese");
       await work.locator(".using").click();

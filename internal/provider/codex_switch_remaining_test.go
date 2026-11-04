@@ -79,6 +79,63 @@ func TestCodexSwitchesWithFifteenPercentLeft(t *testing.T) {
 	}
 }
 
+// In order, the sign-in moves on at the same place as Smart does: with
+// 15% of the five hours left, not only once the window is used up. The
+// routing's own share says what the gateway sends requests where; the
+// sign-in's move is on the five hours either way.
+func TestCodexSwitchesWithFifteenPercentLeftInOrder(t *testing.T) {
+	home := signIn(t) // me@example.com, acct-1
+	rememberLogins(true)
+	codexSignIn(t, home, "work@example.com", "r-work")
+	rememberLogins(true)
+	for _, u := range []string{"work@example.com", "me@example.com"} {
+		if err := SetLoginOn("codex", u, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetAccountOrder("codex", []string{"work@example.com", "me@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRouting("codex", Ordered); err != nil {
+		t.Fatal(err)
+	}
+	// the five hours of each account: the one in use has 20% left, the
+	// other is fresh
+	used := map[string]float64{"acct-1": 0, "acct-work@example.com": 80}
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := r.Header.Get("chatgpt-account-id")
+		json.NewEncoder(w).Encode(map[string]any{"plan_type": "plus", "rate_limit": map[string]any{
+			"primary_window": map[string]any{"used_percent": used[acct], "limit_window_seconds": 18000}}})
+	}))
+	defer fake.Close()
+	old := CodexBase
+	CodexBase = fake.URL + "/backend-api/codex"
+	t.Cleanup(func() { CodexBase = old })
+
+	switched := func() string {
+		t.Helper()
+		loginUsageCache.Lock()
+		loginUsageCache.m = nil
+		loginUsageCache.Unlock()
+		to, err := SwitchWhenSpent(context.Background(), "codex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return to
+	}
+
+	// 20% left is still room, in order as in Smart
+	if to := switched(); to != "" {
+		t.Fatalf("switched to %q with 20%% left", to)
+	}
+	// 15% left: the account is moved off, though the window is not used
+	// up: the next account in the order takes over
+	used["acct-work@example.com"] = 85
+	if to := switched(); to != "me@example.com" {
+		t.Fatalf("switched to %q with 15%% left, want me@example.com", to)
+	}
+}
+
 // The account the sign-in was moved off comes back once its five hours
 // have room again, and not before: the threshold it was moved off at and
 // the one it comes back at must not overlap, or the sign-in would go back
