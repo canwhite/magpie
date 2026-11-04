@@ -21,10 +21,26 @@ magpie models codex
 magpie models minimax-code
 ```
 
-记录输出的完整模型 ID，例如：
+当前配置记录显示，`LAN clients` 之前只允许：
 
 ```text
-codex/gpt-5.5
+codex/gpt-5.6-luna
+```
+
+如果要让 GPT-5.6 三档都可选，应至少确认并纳入下面三个模型：
+
+```text
+codex/gpt-5.6-sol
+codex/gpt-5.6-terra
+codex/gpt-5.6-luna
+```
+
+实际模型名仍以 `magpie models codex` 的输出为准。记录输出的完整模型 ID，例如：
+
+```text
+codex/gpt-5.6-sol
+codex/gpt-5.6-terra
+codex/gpt-5.6-luna
 minimax-code/MiniMax-M2.1
 ```
 
@@ -36,7 +52,7 @@ minimax-code/MiniMax-M2.1
 
 ```sh
 magpie group add codex-minimax \
-  models=codex/gpt-5.5,minimax-code/MiniMax-M2.1 \
+  models=codex/gpt-5.6-sol,codex/gpt-5.6-terra,codex/gpt-5.6-luna,minimax-code/MiniMax-M2.1 \
   routing=order
 ```
 
@@ -83,7 +99,9 @@ minimax-code/MiniMax-M2.1
 
 ```sh
 magpie gateway-key models <key-id> \
-  codex/* \
+  codex/gpt-5.6-sol \
+  codex/gpt-5.6-terra \
+  codex/gpt-5.6-luna \
   minimax-code/*
 ```
 
@@ -92,7 +110,7 @@ magpie gateway-key models <key-id> \
 ```text
 base_url = http://<网关IP>:3425/v1
 api_key  = 原来的 gateway key
-model    = codex/gpt-5.5
+model    = codex/gpt-5.6-sol
 ```
 
 需要切换 MiniMax 时，将 `model` 改为：
@@ -100,6 +118,26 @@ model    = codex/gpt-5.5
 ```text
 minimax-code/MiniMax-M2.1
 ```
+
+Codex 的三档模型可以直接切换为：
+
+```text
+codex/gpt-5.6-sol
+codex/gpt-5.6-terra
+codex/gpt-5.6-luna
+```
+
+如果只想扩大当前 `LAN clients` key 的模型白名单，而不创建组，执行：
+
+```sh
+magpie gateway-key models <key-id> \
+  codex/gpt-5.6-sol \
+  codex/gpt-5.6-terra \
+  codex/gpt-5.6-luna \
+  minimax-code/*
+```
+
+这条命令会替换该 key 原有的模型限制；执行前先记录当前限制，并确认 `<key-id>` 是 `LAN clients` 对应的 ID。
 
 这种模式会共用网关、key 和 `base_url`，但由客户端明确选择 provider，不会通过组自动 fallback。
 
