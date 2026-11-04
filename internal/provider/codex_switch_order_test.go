@@ -8,15 +8,16 @@ import (
 	"testing"
 )
 
-// In order, Codex stays signed in to the account it is on at 98% of its
-// five-hour allowance, as the gateway still sends that one requests first,
-// and moves on once it is used up (#530); Smart moves it at 98%, as before.
-// Kept on the first (KeepLogin), it stays however used up that is, and
-// moves on again once that is off (#524).
+// In order, Codex moves off the account it is on once its five-hour
+// allowance has 15% left (codexSwitchLeft), as the gateway still sends
+// that one requests first but a turn that started only at the end would
+// leave the next account no room (#530); Smart moves it off at the same
+// place, for the five hours are what the sign-in's move is decided on
+// (codex_fivehour.go). Kept on the first (KeepLogin), it stays however
+// used up that is, and moves on again once that is off (#524).
 //
-// The five hours are what the sign-in's move is decided on
-// (codex_fivehour.go): a week at 98% does not move it off an account
-// whose five hours are fresh.
+// A week at 98% does not move it off an account whose five hours are
+// fresh.
 func TestCodexLoginOrderedAndKept(t *testing.T) {
 	home := signIn(t) // me@example.com, acct-1
 	rememberLogins(true)
@@ -28,7 +29,7 @@ func TestCodexLoginOrderedAndKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the five hours of each account, and its week
-	used := map[string]float64{"acct-work@example.com": 98, "acct-1": 0, "acct-spare@example.com": 20}
+	used := map[string]float64{"acct-work@example.com": 80, "acct-1": 0, "acct-spare@example.com": 20}
 	week := map[string]float64{"acct-work@example.com": 98, "acct-1": 0, "acct-spare@example.com": 0}
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		acct := r.Header.Get("chatgpt-account-id")
@@ -64,16 +65,17 @@ func TestCodexLoginOrderedAndKept(t *testing.T) {
 		t.Fatalf("signed in to %s", active())
 	}
 
-	// in order: at 98% it stays, used up it moves on
+	// in order: with 15% of its five hours left it moves on, as Smart
+	// does, for the five hours are what the move is decided on
 	if err := SetRouting("codex", Ordered); err != nil {
 		t.Fatal(err)
 	}
 	if to := switched(); to != "" {
-		t.Fatalf("in order, moved off an account at 98%%, to %s", to)
+		t.Fatalf("in order, moved off an account with 20%% left, to %s", to)
 	}
-	used["acct-work@example.com"] = 100
+	used["acct-work@example.com"] = 85
 	if to := switched(); to != "spare@example.com" {
-		t.Fatalf("in order, used up: moved to %q", to)
+		t.Fatalf("in order, 15%% left: moved to %q", to)
 	}
 	// renewed, back on the first
 	used["acct-work@example.com"] = 0
@@ -81,13 +83,22 @@ func TestCodexLoginOrderedAndKept(t *testing.T) {
 		t.Fatalf("back to %q", to)
 	}
 
-	// smart: at 98% it moves on, as before
+	// a week at 98% does not move it off: the five hours are what the
+	// move is decided on
+	used["acct-work@example.com"] = 80
+	week["acct-work@example.com"] = 99
+	if to := switched(); to != "" {
+		t.Fatalf("moved off an account whose week is at 99%%, to %s", to)
+	}
+	week["acct-work@example.com"] = 98
+
+	// smart: with 15% left it moves on too
 	if err := SetRouting("codex", ""); err != nil {
 		t.Fatal(err)
 	}
-	used["acct-work@example.com"] = 98
+	used["acct-work@example.com"] = 85
 	if to := switched(); to != "spare@example.com" {
-		t.Fatalf("smart at 98%%: moved to %q", to)
+		t.Fatalf("smart with 15%% left: moved to %q", to)
 	}
 	used["acct-work@example.com"] = 0
 	if to := switched(); to != "work@example.com" {

@@ -25,6 +25,32 @@ import (
 // codexFiveHourSpan is how long a ChatGPT account's five-hour window runs.
 const codexFiveHourSpan = 5 * time.Hour
 
+// codexSwitchLeft is the share of the five-hour window that is left when
+// the sign-in moves off an account: 15, so the account is moved off at
+// 85% used.
+//
+// A turn that starts only when the account is used up leaves the next
+// account no room to be of use: the window that was there when the turn
+// began is gone by the time the account is exhausted, and the next
+// account's own window has run for nothing. Moving off at 85% leaves the
+// next account a window's worth of room to be used in.
+//
+// It is below codexBackShare, the share the account comes back at, so the
+// sign-in does not go back and forth at the edge: an account moved off at
+// 85% is back only once it is under codexBackShare, which is further
+// from the edge than the share it was moved off at.
+const codexSwitchLeft = 15
+
+// codexSwitchShare is the share of the five-hour window past which the
+// sign-in moves off an account: 100 - codexSwitchLeft, so 85.
+const codexSwitchShare = 100 - codexSwitchLeft
+
+// codexBackShare is the share below which the account the sign-in moved
+// off comes back to: under it there is room again. It is above the share
+// the account is moved off at (codexSwitchLeft), so the two do not
+// overlap.
+const codexBackShare = 80
+
 // codexFiveHourNames are the names a five-hour window goes by in a
 // reading, in lower case.
 var codexFiveHourNames = []string{"5 hours", "5 hour", "5h", "five hours", "five hour"}
