@@ -773,6 +773,63 @@ survives the fold, and the takeover above put it back.
 
 <!-- AUTO-GENERATED: New risks will be appended below -->
 
+## Run again, after the pre-mortem
+
+The takeover was run again with the build that knows the `taken` field,
+and the sign-in was moved by hand through work1, work2 and the local
+account: `~/.codex/auth.json` held each account's credentials in turn,
+and the four profile folders' `auth.json` were byte-for-byte what they
+were before (the same checksums after each switch). The marks are in
+`logins.json` and are not being stripped by the build running as
+`magpie serve`.
+
+**A red the machine's own proxy caused was found and fixed.**
+`TestProxyCheckSaysAProxyPassedBy` was red on this branch and on
+`origin/main` alike: the machine has a system proxy (127.0.0.1:7890),
+and `netproxy.For` reads it when the environment names none, so it
+answered for the trace page the test meant to reach itself. The system
+proxy has a seam now (`netproxy.SystemProxyForTest`), and the test
+holds its own world.
+
+**Run at this head** (2026-11-05, on top of `8d521fe9`):
+
+- `gofmt -l` on the changed packages: nothing. (On the whole tree,
+  `internal/library/skillgit_test.go` is unformatted, at `origin/main`
+  too, and is not this work's.)
+- `go vet ./...`, `GOOS=linux go vet -tags nogui ./...`, `GOOS=windows go vet
+  ./...`: ok.
+- `go build`, `GOOS=linux go build -tags nogui`, `GOOS=windows go build`: ok.
+- `go test -tags nogui -timeout 45m ./...`: the failures are
+  `TestCodexFittedImagesPastTheBudget`, `TestMarshalRawIsEncodingJSON`,
+  `TestServeWSLListensBesideLoopback` and `FuzzMarshalRaw` (gateway),
+  `TestPluginSOCKSProxy` (plugin) and
+  `TestUnreadLoginsWriteErrorsKeepCredentials` (provider). Each was
+  checked at `origin/main` in a clean worktree and fails there too —
+  the gateway's four with Go 1.27.1 and 1.26.8, the plugin's with both.
+- `go test -tags nogui ./internal/gui`: ok.
+- `go test -race -count=3 -run TestProxyCheck ./internal/gui`: ok.
+- `go test -race -count=2 ./internal/netproxy`: ok.
+- The GUI suite's account files (`account-alias`, `account-arrange`,
+  `account-cap`, `account-mask`, `account-mask-sessions`,
+  `account-models`, `account-proxy`, `codex-accounts-via`,
+  `codex-signin-always`, `own-signin-remove`) in Chromium and WebKit:
+  128 tests, ok. The switch files (`routing-signin`, `switch-only`,
+  `account-return`, `keep-login`, `i18n-keys`, `claude-signin`,
+  `gateway-key-accounts`, `checkin-account`, `aside-account`,
+  `copilot-signed-out-account`): 228 tests, ok.
+- The whole GUI suite (895 files) was started and not finished in the
+  time given; the 152 files it got through had two failures,
+  `account-discovery` ("agents' sign-ins read, or not at all") and
+  `context-map` ("the context window as a map"), both of which fail at
+  `origin/main` too.
+
+**A new test that holds a guarantee the pre-mortem claims:**
+`TestTakenOverAccountSurvivesAMovedProfile` — a profile multicodex moves
+is still the same account and still magpie's: the mark survives the
+fold of the two records of it, so the account is in no folder and the
+sign-in may still move to it. It is red when the mark's protection is
+broken.
+
 Six months on, the rotation is a mess: the accounts are signed out, the
 sign-in lands on the wrong one, and nobody can say why. What went wrong?
 
