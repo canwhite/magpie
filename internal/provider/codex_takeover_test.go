@@ -372,3 +372,70 @@ func TestTakenOverMarkSurvivesTheFold(t *testing.T) {
 		t.Fatalf("the take-over mark was lost: %+v", out[0])
 	}
 }
+
+// A profile multicodex moves is still the same account, and still
+// magpie's: the account is left out by name, not by the folder it was
+// in, so where the profile moved does not bring it back to the folder.
+func TestTakenOverAccountSurvivesAMovedProfile(t *testing.T) {
+	home := signIn(t)
+	t.Setenv("CODEX_HOME", "")
+	profile := filepath.Join(home, "multicodex/profiles/work1/codex-home")
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	idTok := fakeJWT(map[string]any{"email": "work@example.com",
+		"https://api.openai.com/auth": map[string]any{"chatgpt_plan_type": "team", "chatgpt_account_id": "acct-work"}})
+	writeFile(t, filepath.Join(profile, "auth.json"), map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]any{"id_token": idTok,
+			"access_token":  fakeJWT(map[string]any{"exp": float64(time.Now().Add(time.Hour).Unix())}),
+			"refresh_token": "r-work", "account_id": "acct-work"},
+	})
+	writeFile(t, filepath.Join(home, "multicodex/config.json"), map[string]any{
+		"version":  1,
+		"profiles": map[string]any{"work1": map[string]any{"name": "work1", "codex_home": profile}},
+	})
+	ForgetAccounts()
+	if _, err := TakeOverCodexAccounts(context.Background(), nil); err != nil {
+		t.Fatalf("taking the account over: %v", err)
+	}
+	// the profile moves: the account's sign-in is in a new folder, and
+	// multicodex's config says where it is now
+	moved := filepath.Join(home, "multicodex/profiles/work9/codex-home")
+	if err := os.MkdirAll(moved, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(profile, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moved, "auth.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, "multicodex/config.json"), map[string]any{
+		"version":  1,
+		"profiles": map[string]any{"work9": map[string]any{"name": "work9", "codex_home": moved}},
+	})
+	// magpie looks at the folders again, as it does every so often
+	rememberLogins(true)
+	ls := Logins("codex")
+	var found *Login
+	for i := range ls {
+		if ls[i].User == teamName {
+			found = &ls[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the account isn't listed: %+v", ls)
+	}
+	// it is still magpie's: the folder it moved to does not hold it
+	// (home is where Codex keeps the account, and a taken-over account
+	// is in none)
+	if found.home != "" {
+		t.Fatalf("the account is held in %q, so it would be renewed there", found.home)
+	}
+	// and the sign-in may still move to it
+	if err := SwitchLogin("codex", teamName); err != nil {
+		t.Fatalf("switching to the taken-over account: %v", err)
+	}
+}

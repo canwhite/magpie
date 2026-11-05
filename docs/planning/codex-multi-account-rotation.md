@@ -730,3 +730,367 @@ survives the fold, and the takeover above put it back.
 
 > Next step: run `/pre-mortem docs/planning/codex-multi-account-rotation.md`
 > to identify failure modes and harden this plan.
+
+---
+
+## Pre-Mortem Risks
+
+<!-- AUTO-GENERATED: New risks will be appended below -->
+
+Six months on, the rotation is a mess: the accounts are signed out, the
+sign-in lands on the wrong one, and nobody can say why. What went wrong?
+
+### [Risk] The released app strips the takeover mark, and the accounts go back to two holders
+
+**Severity**: 5 | **Likelihood**: 4 | **Detectability**: 0.3
+**Risk Score**: 14
+
+**Failure Scenario**: The `taken` mark lives only in `logins.json`, and
+only a build that knows the field writes it. The released app (v0.1.1561
+at the time of writing) does not know it, and writes `logins.json`
+without it. So the mark is gone the moment the released app writes the
+file, and the account looks like an ordinary one held in a Codex folder:
+`codexHeldIn` says the profile folder holds it, `renewSaved` renews it
+*there*, and the copy in `logins.json` is a second holder of one refresh
+token. Whichever refreshes first spends it, and the other is signed
+out — the exact failure step 2 exists to prevent, and the plan's own
+"Still to do by hand" note says it is waiting for a release.
+
+**Mitigation**:
+
+- The mark is written by every path that writes the file, not only the
+  takeover: `upsertLogin` keeps it (`if l.Taken == "" { l.Taken =
+  ls[i].Taken }`), so a new build's write preserves it.
+- The released app must not write the file without the field. Until it
+  does, the takeover is run with a build that knows it, and the plan
+  says so in the place a reader looks ("Still to do by hand").
+- A test that the released app's shape is caught: `upsertLogin` keeps
+  the mark (in `internal/provider`), and the takeover's own test
+  (`TestTakenOverCodexAccountIsMagpiesAlone`) holds that the account is
+  magpie's alone.
+- The whole failure is visible: `magpie accounts codex --json` says
+  which account is taken over, so a mark that went missing is seen
+  before the accounts are signed out.
+
+### [Risk] The two sign-in holders meet, and the account is signed out
+
+**Severity**: 5 | **Likelihood**: 3 | **Detectability**: 0.4
+**Risk Score**: 9
+
+**Failure Scenario**: The plan's central promise is one holder of one
+refresh token. It is kept by three readers answering to the mark:
+`codexHeldIn` (does not treat a taken account as held in its old
+folder), `codexHomeLogins` (does not read it back out of that folder)
+and `renewSaved` (refreshes it in `logins.json`, never in the folder).
+A fourth path is written later, or already exists and was not found,
+and it copies the sign-in out of a folder Codex still holds — the
+guard's failure mode named in the plan's own "failure to expect".
+
+**Mitigation**:
+
+- `sameRefresh` and `codexHeldIn` are the guards, and the tests that
+  hold them are named in the plan's verification table.
+- Every path that reads a Codex folder is found by grepping
+  `codexOtherHomes`, `codexHomeLogins`, `codexHeldIn` and `renewSaved`
+  — the plan's "global scan" lists all four. A new path that copies an
+  `auth.json` out of a folder breaks the guard, and the review checks
+  for it.
+- A test that a taken account is renewed in `logins.json` and not in
+  its folder (`TestTakenOverCodexAccountIsRefreshedInMagpiesCopy`), and
+  one that the folder is left byte-for-byte alone
+  (`TestTakenOverCodexAccountLeavesItsFolderAlone`).
+
+### [Risk] The rotation does not turn over, or turns over to the wrong account
+
+**Severity**: 4 | **Likelihood**: 3 | **Detectability**: 0.5
+**Risk Score**: 6
+
+**Failure Scenario**: The user asked for `work1`→`work2`→`work3`→
+`work4`→local, driven by the 5-hour window, returning to `work1` when
+its window resets. The window's identity comes from the vendor's
+reading (`codexWindow.window()`), so a vendor that renames the window,
+or a span the code cannot read, makes the 5-hour window "a long one" and
+it is held until nearly spent. The sign-in then sits on a spent account
+and every request 429s, or it moves to the local account while four
+team accounts have room.
+
+**Mitigation**:
+
+- The window's identity is read from the vendor, not assumed: the plan
+  says to print the windows before assuming a name or a span, and the
+  five accounts' readings were checked on the machine.
+- A window whose span is not read is held at the long share, which is
+  the careful direction (an account is held back rather than dropped),
+  and the two kinds are told apart by how long the window runs.
+- `TestCodexAccountsTurnOverAsACycle` holds the order (it fails when
+  the walk is reversed), and `TestCodexSwitchesWithFifteenPercentLeft`
+  and `TestCodexComesBackOnlyWhenThereIsRoom` hold the window that
+  drives it.
+- The share the sign-in moves off at is the user's
+  (`MAGPIE_SWITCH_LEFT`), so a wrong default is one number away from
+  right, and the page says the share that is in force.
+
+### [Risk] The accounts' quotas go unread, and the rotation runs on stale windows
+
+**Severity**: 4 | **Likelihood**: 3 | **Detectability**: 0.4
+**Risk Score**: 7.2
+
+**Failure Scenario**: The rotation turns on the 5-hour windows, and the
+windows are read from `/wham/usage`. If that read fails, the account
+that is not being sent requests stops being read, and its window stays
+where it was: an account that is really spent looks free, or one that
+reset looks spent. The sign-in then stays on a spent account (every
+request 429s) or stays off a fresh one (the user's quota goes unused).
+
+**Mitigation**:
+
+- A failed read means "unknown", not "free" (the code standards): the
+  reading is kept, and the account is not moved to on the strength of
+  a read that failed.
+- A reply's own headers are the freshest source (`NoteCodexLimits`) and
+  update the window as each request goes out, which is what keeps the
+  cap from being overshot (#1295).
+- The account that is out of the rotation still gets read — its reading
+  is what says it is out again when the window resets.
+
+### [Risk] The gateway keeps sending to a spent account while the sign-in moved
+
+**Severity**: 3 | **Likelihood**: 4 | **Detectability**: 0.5
+**Risk Score**: 6
+
+**Failure Scenario**: The plan scopes the 5-hour window to the *sign-in
+switch* and leaves the gateway's routing alone ("the gateway's routing
+already sends to whichever account has room"). If the two disagree —
+the sign-in moves on the 5-hour window, the gateway still sends on the
+weekly one — the user's local Codex app is on one account while the
+LAN's requests go to another, and the accounts that have room go unused.
+
+**Mitigation**:
+
+- The plan names the places the two kinds of window are told apart
+  (`usedPast`, `usedUp`/`BackAt`, `internal/gateway/fallback.go`'s
+  `capHold`/`HoldCaps`, `Allowance.For`/`Allowance.heldUp`) and checks
+  each is a decision about a different thing, so the change is scoped
+  to the sign-in switch and the others keep their meaning.
+- The gateway's candidate order follows the same `Order` the sign-in
+  does (`candidate.rank` reads the account order), so the two agree on
+  which account is first.
+
+### [Risk] multicodex signs the accounts in again, and the two fight over the refresh token
+
+**Severity**: 4 | **Likelihood**: 3 | **Detectability**: 0.5
+**Risk Score**: 6
+
+**Failure Scenario**: The plan tells the user to sign each account in
+again in multicodex (`multicodex login <name>`) after the takeover.
+That sign-in writes a *new* refresh token into the profile's
+`auth.json`. magpie still holds the old one in `logins.json` and
+refreshes it, and the account is signed in twice with two refresh
+tokens — the vendor may accept the first and refuse the second
+(`refresh_token_reused`), signing one of them out.
+
+**Mitigation**:
+
+- The takeover says so before it happens, and the command says the
+  account needs a fresh sign-in in multicodex afterwards — the fix
+  that came out of the plan's own check, when the command first said
+  the opposite.
+- The user signs in in multicodex *once*, after the takeover; magpie's
+  copy is then the stale one, and the next takeover re-reads the
+  folder, taking the fresh token.
+- magpie never writes the profile folder, so it cannot start the race
+  itself; only a sign-in the user asked for writes there.
+
+### [Risk] The user's own Codex app and CLI end up on the wrong account
+
+**Severity**: 3 | **Likelihood**: 4 | **Detectability**: 0.6
+**Risk Score**: 4.8
+
+**Failure Scenario**: magpie writes the account it rotates to into
+`~/.codex/auth.json`. The Codex app and the background app-server keep
+their own sign-in and show a stale account until they are quit and
+opened again. A user who does not know that sees the app on the wrong
+account and believes the rotation is broken.
+
+**Mitigation**:
+
+- magpie says so: `noteCodexSwitch` and `CodexAppStale` tell the user
+  the app is stale, and the CLI's own message says "sessions already
+  running keep their account until restarted".
+- magpie does not quit the user's app (that is the user's call).
+
+### [Risk] The order the user arranged is lost
+
+**Severity**: 3 | **Likelihood**: 3 | **Detectability**: 0.6
+**Risk Score**: 3.6
+
+**Failure Scenario**: The rotation follows the account order, which is
+the user's (a drag in the Accounts page, or `magpie accounts order`).
+The order is written to `logins.json` as `Order`, and a write that
+does not know about it — the released app again — drops it, and the
+accounts fall back to the alphabetical order they were found in. The
+rotation then turns over in an order nobody asked for, and the local
+account may not be last.
+
+**Mitigation**:
+
+- `upsertLogin` keeps `l.Order = ls[i].Order`, so every write that
+  goes through it keeps the order.
+- The order is checked on the machine (`magpie accounts codex` shows
+  it) and held by a test in `internal/gui`
+  (`providers_switch_left_test.go`, `accounts_switch_left_cli_test.go`).
+
+### [Risk] The five accounts' sessions are counted as the user's own, and the Requests page changes meaning
+
+**Severity**: 2 | **Likelihood**: 4 | **Detectability**: 0.7
+**Risk Score**: 2.4
+
+**Failure Scenario**: `appdir.CodexHomes` is read by `internal/sessions`
+(`CodexDirs`) too, so the four team accounts' sessions start being
+counted in the Requests page. The page means something different
+after the change, and the user did not ask for that.
+
+**Mitigation**:
+
+- The plan names it as a visible change, in the "global scan" section,
+  rather than leaving it to be discovered.
+- It is a consequence of finding the folders, which is the plan's goal;
+  it is not a separate decision and may be reverted on its own.
+
+### [Risk] multicodex moves a profile, and magpie keeps the old folder
+
+**Severity**: 3 | **Likelihood**: 3 | **Detectability**: 0.4
+**Risk Score**: 5.4
+
+**Failure Scenario**: The plan made `~/multicodex/config.json` the
+authority: each profile's `codex_home` is taken from it, so a folder
+multicodex moves is one magpie follows. But `taken` holds the *old*
+folder's path, and `codexHomeLogins` leaves an account out by *name*,
+not by folder. So a profile that moves is followed for the discovery
+(the config says where it is now) but the mark still names the old
+folder, and the account in the new folder is read as an ordinary
+account held in a Codex folder — which would make magpie renew it
+*there*, a second holder of the token it also holds in `logins.json`.
+
+**What actually happens (checked, 2026-11-05)**: the account is kept,
+and it is not read back out of the new folder. The mark survives the
+fold of the two records of the account (`dedupeLogins`), so the folder
+does not hold it, and the sign-in may still move to it. The mark's path
+is stale, but nothing reads it to decide.
+
+**Mitigation**:
+
+- The mark survives the fold, so where the profile moved does not
+  matter: `dedupeLogins` keeps `Taken` on the record it keeps, and the
+  account is in no folder.
+- The mark holds the folder it came from, so a stale path is visible
+  rather than silent.
+- The takeover is re-run when the user moves a profile: it reads the
+  folders as they are then, and the mark follows the account to the
+  folder it is in.
+- A test that holds this: the moved profile's account is still the
+  user's own, still in use, held in no folder, and the sign-in may
+  still move to it
+  (`TestTakenOverAccountSurvivesAMovedProfile`).
+
+### [Risk] The account's own folder is read as holding the account again
+
+**Severity**: 4 | **Likelihood**: 2 | **Detectability**: 0.5
+**Risk Score**: 4
+
+**Failure Scenario**: `codexHomeLogins` reads the folders and leaves out
+the accounts magpie took over, by name (`taken[strings.ToLower(l.User)]`).
+The name is how the account is told apart — and the name is what the
+vendor reads out of the token. If the vendor changes what it puts in
+the token (a suffix, a workspace), the account in the folder has a
+different name from the one magpie took over, so it is not left out:
+magpie reads the account back out of the folder and takes it back, and
+the two holders meet.
+
+**Mitigation**:
+
+- The account in the folder is told by more than its name: `sameLogin`
+  (email and organization or workspace) and `sameRefresh` (the refresh
+  token itself) are the other ways two records are one account.
+- The mark holds the *folder*, so `codexHeldIn` can answer for an
+  account whose name changed: it is taken over, so the folder is not
+  read as holding it.
+- `dedupeLogins` folds the records of one account into one, so a
+  second record for it is not written beside the first — and the fold
+  keeps the mark on the record it keeps, so a record read out of the
+  folder cannot take the account back.
+
+### [Risk] Two magpies run at once, and both refresh the same account
+
+**Severity**: 4 | **Likelihood**: 2 | **Detectability**: 0.4
+**Risk Score**: 4.8
+
+**Failure Scenario**: The plan's own "logic correctness" walk names
+this: two magpies run at once, and only one refreshes; the other takes
+the fresh token (`codexMu` / `savedTokenMu`). The takeover adds a
+second place a refresh happens — `renewTakenCodex` — and if it does
+not take the same lock, two magpies (or one magpie and a CLI run of
+`magpie accounts refresh`) refresh the same taken account and one
+spends the token the other is holding.
+
+**Mitigation**:
+
+- `renewSaved` takes `savedTokenMu` before it decides anything, and
+  `renewTakenCodex` is called from inside it, so the taken account is
+  refreshed under the same lock as every other saved account.
+- That lock is a file lock (`loginsPath()+".renew.lock"`), so it holds
+  across magpies too (#1674): the gateway's refresh and one by a
+  magpie run from a terminal cannot both spend the same token.
+- `switchSavedLogin` takes the same lock, so a switch cannot hand out
+  a refresh token a refresh is spending.
+- The takeover itself takes `loginsMu`, so two takes at once cannot
+  write two records for one account.
+- The Codex folders' own refreshes take `codexMu`
+  (`loginsPath()+".codex.lock"`), a second file lock, so a refresh in
+  a folder and one in `logins.json` are held apart from each other.
+
+### [Risk] The sign-in moves to an account that is on, but the user never turned it on
+
+**Severity**: 3 | **Likelihood**: 2 | **Detectability**: 0.6
+**Risk Score**: 2.4
+
+**Failure Scenario**: The rotation walks the accounts that are `On`, in
+the order the user arranged. The takeover turns each taken account on
+(`l.On = true`), which is right for the takeover the user asked for —
+but a takeover of *all* the profiles also turns on accounts the user
+had turned off in magpie on purpose (a team account that is paused,
+or one the user does not want used by the LAN).
+
+**Mitigation**:
+
+- The takeover takes the accounts the user names, or all of them when
+  the names are empty; a user who wants one account out of the
+  rotation takes over the others and turns this one off.
+- The order the user arranged is kept: `upsertLogin` keeps
+  `l.Order = ls[i].Order`, so the takeover does not rearrange the
+  accounts it did not name.
+
+### [Risk] The plan's own verification was done on a machine with a proxy, and the proxy answered for the tests
+
+**Severity**: 3 | **Likelihood**: 3 | **Detectability**: 0.5
+**Risk Score**: 4.5
+
+**Failure Scenario**: The GUI's proxy check test was red on this
+machine — and on `main` — because the machine's own system proxy
+answered for the trace page the test meant to reach itself. The plan's
+verification runs would have carried that red along and called it
+"the same on main", which is not a baseline (the code standards say so
+in as many words). A red that is a real bug on this machine would have
+been filed as an environment quirk.
+
+**Mitigation**:
+
+- The red was checked at `origin/main` in a clean worktree, which is
+  what showed it was the machine's proxy and not this work; the cause
+  was then fixed at its source (a seam for the system proxy, so the
+  tests hold their own world).
+- Every red this work names was checked against `origin/main` and the
+  check is written down in the plan's verification section.
+- The acceptance checks are the ones the code standards list, not a
+  chosen subset: `gofmt -l`, `go vet` on three platforms, `go build`
+  on three platforms, and the full suite.
