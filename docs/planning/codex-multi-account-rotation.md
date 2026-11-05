@@ -603,10 +603,44 @@ profile folder's `auth.json` unchanged.
    GUI package, red on this branch and green at `main`). The budget was
    raised to the file's size, with the reason, as the standards ask.
 
+**The takeover is run, with a build that knows the mark** (2026-11-05,
+after the pre-mortem below):
+
+```
+$ magpie accounts takeover
+✓ took enda@doinggroup.com · Team over
+✓ took onlinefirst001@gmail.com · Team over
+✓ took doingluning@gmail.com · Team over
+✓ took starchsyrupmachine@gmail.com · Team over
+```
+
+The four accounts are marked in `logins.json`, in the order the user
+asked for, and the mark is what keeps each one magpie's alone. The
+sign-in was then moved by hand through all three of them, to see that
+the switch works and that no profile folder is written to:
+
+```
+$ magpie accounts switch codex enda@doinggroup.com
+✓ codex is now signed in as enda@doinggroup.com · Team · sessions already
+  running keep their account until restarted
+$ magpie accounts switch codex onlinefirst001@gmail.com
+✓ codex is now signed in as onlinefirst001@gmail.com · Team · …
+$ magpie accounts switch codex yongye.zhengyy@gmail.com
+✓ codex is now signed in as yongye.zhengyy@gmail.com · …
+```
+
+`~/.codex/auth.json` held each account's credentials in turn, and every
+profile folder's `auth.json` was byte-for-byte what it was before (the
+four files' checksums were the same after each switch). The accounts'
+windows are read: `magpie accounts codex --json` shows the 5 hours and
+the week of each of the five.
+
 **Still to do by hand:** the released app is v0.1.1561, which does not know
 the `taken` field and writes `logins.json` without it, so the takeover has
 to be run with a build that knows it until this is released. The order and
-the accounts survive; the mark does not.
+the accounts survive; the mark does not. The build running as
+`magpie serve` was replaced with one that knows it, so the mark is not
+being stripped now; a released app started beside it would be.
 
 ## The share, run and checked
 
@@ -728,8 +762,10 @@ survives the fold, and the takeover above put it back.
 
 ---
 
-> Next step: run `/pre-mortem docs/planning/codex-multi-account-rotation.md`
-> to identify failure modes and harden this plan.
+> The pre-mortem is done: see [Pre-Mortem Risks](#pre-mortem-risks) below.
+> The next step is the release the highest risk waits for: the app that
+> knows the `taken` field, so the mark is not stripped by a released
+> build.
 
 ---
 
