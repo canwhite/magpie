@@ -646,6 +646,42 @@ it was 0, so a user who told "0" would have seen the default (15) on the
 page instead. The field is always written now, and the two tests above
 are red without it.
 
+## The rotation, run on the machine
+
+The plan was run end to end on this machine, with the build that knows
+the `taken` field:
+
+1. `magpie accounts takeover` took the four multicodex accounts over
+   again, and the marks came back: each account's `taken` is the folder
+   it came from, its `home` is the same folder, and the order
+   (work1, work2, work3, work4, local) and every account's being on are
+   as they were.
+2. `magpie accounts switch codex "enda@doinggroup.com · Team"` signed
+   Codex in to work1, and `magpie accounts codex` showed the five
+   accounts with their windows, the first one signed in to.
+3. **The rotation moved the sign-in on its own**, a minute later, and
+   said so:
+
+   ```
+   2026/11/05 15:53:57 codex: enda@doinggroup.com · Team has 15% or less of its
+   allowance left; signed it in to onlinefirst001@gmail.com · Team
+   ```
+
+   work1's five hours were at 99%, so the sign-in moved to work2, which
+   had all of its window left — the plan's rule, with the share the user
+   told.
+4. **One holder of a refresh token, still.** Every account's refresh
+   token is in magpie's copy in `logins.json`, and the profile folders
+   hold the ones they held before the takeover, unchanged.
+
+**A second fix came out of the run:** the take-over mark was lost when
+two records of one account were folded into one (`dedupeLogins`), so the
+account was held in its folder again and the sign-in could not move to
+it — `magpie accounts switch codex "enda@doinggroup.com · Team"`
+answered "is signed in to Codex in
+/Users/doing/multicodex/profiles/work1/codex-home". The mark now
+survives the fold, and the takeover above put it back.
+
 ## Open Questions
 
 **Answered while the work was done:**
