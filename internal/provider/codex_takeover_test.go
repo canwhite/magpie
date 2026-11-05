@@ -306,3 +306,69 @@ func TestTakenOverCodexAccountLeavesItsFolderAlone(t *testing.T) {
 		t.Fatalf("~/.codex/auth.json doesn't hold the account it is on: %s", main)
 	}
 }
+
+// A taken-over account keeps its mark when the two records of it are
+// folded into one: the account magpie took over, and the one read back
+// out of the folder it came from. Without the mark the account is held
+// in its folder again, and the sign-in cannot move to it.
+func TestTakenOverCodexAccountKeepsItsMarkThroughTheFold(t *testing.T) {
+	home := signIn(t)
+	t.Setenv("CODEX_HOME", "")
+	profile := filepath.Join(home, "multicodex/profiles/work1/codex-home")
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	idTok := fakeJWT(map[string]any{"email": "work@example.com",
+		"https://api.openai.com/auth": map[string]any{"chatgpt_plan_type": "team", "chatgpt_account_id": "acct-work"}})
+	writeFile(t, filepath.Join(profile, "auth.json"), map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]any{"id_token": idTok,
+			"access_token":  fakeJWT(map[string]any{"exp": float64(time.Now().Add(time.Hour).Unix())}),
+			"refresh_token": "r-work", "account_id": "acct-work"},
+	})
+	writeFile(t, filepath.Join(home, "multicodex/config.json"), map[string]any{
+		"version":  1,
+		"profiles": map[string]any{"work1": map[string]any{"name": "work1", "codex_home": profile}},
+	})
+	ForgetAccounts()
+	if _, err := TakeOverCodexAccounts(context.Background(), nil); err != nil {
+		t.Fatalf("taking the account over: %v", err)
+	}
+	// the account is read out of its folder again, as magpie looks at
+	// the folders every so often: the two records of it fold into one
+	// (dedupeLogins), and the mark has to survive the fold
+	rememberLogins(true)
+	ls := Logins("codex")
+	var found *Login
+	for i := range ls {
+		if ls[i].User == teamName {
+			found = &ls[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the account isn't listed: %+v", ls)
+	}
+	// and the sign-in may still move to it: the folder holds the
+	// sign-in as it was, but the account is magpie's
+	if err := SwitchLogin("codex", teamName); err != nil {
+		t.Fatalf("switching to the taken-over account: %v", err)
+	}
+}
+
+// The fold of two records of one account keeps the take-over mark: the
+// account magpie took over, and the one read back out of the folder it
+// came from, are one account, and the mark is what tells them apart.
+func TestTakenOverMarkSurvivesTheFold(t *testing.T) {
+	auth := json.RawMessage(`{"tokens":{"id_token":"h.eyJlbWFpbCI6IndvcmsxQGV4YW1wbGUuY29tIiwiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC13b3JrIn0.sig","account_id":"acct-work"}}`)
+	ls := []savedLogin{
+		{Agent: "codex", User: "work@example.com", Auth: auth, Taken: "/home/.cx/work", On: true, Seen: time.Now().Add(-time.Minute)},
+		{Agent: "codex", User: "work@example.com", Auth: auth, Home: "/home/.cx/work", Seen: time.Now()},
+	}
+	out := dedupeLogins(ls)
+	if len(out) != 1 {
+		t.Fatalf("folded into %d records", len(out))
+	}
+	if out[0].Taken == "" {
+		t.Fatalf("the take-over mark was lost: %+v", out[0])
+	}
+}

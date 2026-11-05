@@ -401,6 +401,17 @@ func dedupeLogins(ls []savedLogin) []savedLogin {
 		if keep.Order == 0 {
 			keep.Order = l.Order
 		}
+		// an account magpie took over from another Codex folder keeps
+		// that mark through the fold: the folder is left alone and the
+		// sign-in is magpie's to refresh. Without it the account is
+		// held in its folder again (codexHeldIn), and the sign-in
+		// can't move to it.
+		if keep.Taken == "" {
+			keep.Taken = previous.Taken
+		}
+		if keep.Taken == "" {
+			keep.Taken = l.Taken
+		}
 		out[found] = keep
 	}
 	return out
