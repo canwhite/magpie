@@ -51,6 +51,10 @@ func proxyCheckRig(t *testing.T, exit ...string) (client *http.Client, proxyURL 
 	}
 	tr := netproxy.Dispatch(base)
 	t.Cleanup(base.CloseIdleConnections)
+	// the machine's own proxy would answer for the trace page, which
+	// resolves nowhere: the test's two servers are the only ones that
+	// may, so the system's proxy stands in for none of them
+	t.Cleanup(netproxy.SystemProxyForTest(netproxy.Proxy{}))
 	return &http.Client{Transport: tr}, proxy.URL, asked
 }
 

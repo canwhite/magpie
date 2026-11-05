@@ -518,10 +518,33 @@ func System() Proxy {
 	return sysCache.p
 }
 
+// SystemProxyForTest stands the system's proxy in for p, until the
+// returned function runs. A test outside this package uses it: the
+// machine's own proxy would otherwise answer for the host a test means
+// to reach, and the test says nothing about magpie (the GUI's proxy
+// check, whose "the proxy is passed by" case read the system's proxy
+// instead of the one it set up).
+func SystemProxyForTest(p Proxy) (restore func()) {
+	sysCache.Lock()
+	old, oldAt, oldP, oldFailed := readSystem, sysCache.at, sysCache.p, sysCache.failed
+	readSystem = func() (Proxy, bool) { return p, true }
+	sysCache.at, sysCache.p = time.Now().Add(time.Hour), p
+	sysCache.Unlock()
+	return func() {
+		sysCache.Lock()
+		readSystem = old
+		sysCache.at, sysCache.p, sysCache.failed = oldAt, oldP, oldFailed
+		sysCache.Unlock()
+	}
+}
+
 // refreshSystem reads the system proxy into sysCache, then closes done.
 // A read that fails keeps what was read before, if anything was.
 func refreshSystem(done chan struct{}) {
-	p, ok := readSystem()
+	sysCache.Lock()
+	read := readSystem
+	sysCache.Unlock()
+	p, ok := read()
 	sysCache.Lock()
 	if ok || sysCache.at.IsZero() {
 		sysCache.p = p
