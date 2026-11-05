@@ -729,9 +729,15 @@ survives the fold, and the takeover above put it back.
 2. **Does the local account take part in the rotation at all?** Yes: it is
    on, ordered last, and used when the four team accounts are out. It is
    not skipped because it is a different plan.
-3. **Is the local account's own 5-hour window consulted?** Yes, as any
-   other account's: it has both windows, so its 5-hour window can push it
-   out too. It is last in the order either way.
+3. **Is the local account's own 5-hour window consulted?** **It has
+   none**, which the machine showed and the plan had assumed otherwise.
+   Its plan reads a week only (`self_serve_business_prolite`: the vendor
+   gives `7 days` and no 5-hour window, as
+   `magpie accounts codex --json` shows), so it takes part in the
+   rotation on its week: `codexFiveHourSpent` says an account with no
+   five-hour window is not spent (`TestCodexUnknownFiveHourIsNotSpent`),
+   and the week removes it of its own accord when it is used up
+   (`codexFiveHourOut`). It is last in the order either way.
 4. **Should the rotation also change what the gateway sends, or only the
    sign-in?** Only the sign-in's order changes; the gateway's routing
    already sends to whichever account has room, and it follows the same
