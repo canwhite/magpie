@@ -523,6 +523,13 @@ type providersJSON struct {
 	// Fetching: accounts' lists are still being asked for
 	// (provider.FetchingNew); the page asks again until they are in
 	Fetching bool `json:"fetching,omitempty"`
+	// SwitchLeft is the share of a rolling window (Codex's and Claude
+	// Code's five hours) left when the sign-in moves off an account, as
+	// the user told it (provider.SwitchLeftRolling). The page says the
+	// share it is, not one of its own. It is always said: a share of
+	// nothing (0) is one the user may tell, and an omitted field would
+	// be read as the default.
+	SwitchLeft float64 `json:"switchLeft"`
 }
 
 // agentModel is the model an agent is on, as magpie's catalog names it.
@@ -964,6 +971,7 @@ func providersState() providersJSON {
 	s.CodexAppOut = codexAppOutState()
 	s.Plugins = pluginSubs()
 	s.Fetching = provider.FetchingNew()
+	s.SwitchLeft = provider.SwitchLeftRolling()
 	return s
 }
 

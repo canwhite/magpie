@@ -129,22 +129,22 @@ func TestCodexSkipsAnAccountOutOfItsWeek(t *testing.T) {
 // account is unknown, not out.
 func TestCodexUnknownFiveHourIsNotSpent(t *testing.T) {
 	q := SubscriptionQuota{Windows: []QuotaWindow{{Name: "5 hours", Used: 100, Span: 5 * time.Hour}}}
-	if !codexFiveHourSpent(q, 98, time.Now()) {
+	if !codexFiveHourSpent(q, switchShare{left: 2, back: 7}, time.Now()) {
 		t.Fatal("the five hours at 100% are not spent")
 	}
 	fresh := SubscriptionQuota{Windows: []QuotaWindow{{Name: "5 hours", Used: 10, Span: 5 * time.Hour}}}
-	if codexFiveHourSpent(fresh, 98, time.Now()) {
+	if codexFiveHourSpent(fresh, switchShare{left: 2, back: 7}, time.Now()) {
 		t.Fatal("the five hours at 10% are spent")
 	}
 	unknown := SubscriptionQuota{Windows: []QuotaWindow{{Name: "weekly", Used: 100, Span: 7 * 24 * time.Hour}}}
-	if codexFiveHourSpent(unknown, 98, time.Now()) {
+	if codexFiveHourSpent(unknown, switchShare{left: 2, back: 7}, time.Now()) {
 		t.Fatal("an account with no five-hour window is spent")
 	}
 	// a window whose reset has passed started again, whatever share it
 	// was read at
 	past := time.Now().Add(-time.Minute)
 	reset := SubscriptionQuota{Windows: []QuotaWindow{{Name: "5 hours", Used: 100, Span: 5 * time.Hour, ResetsAt: &past}}}
-	if codexFiveHourSpent(reset, 98, time.Now()) {
+	if codexFiveHourSpent(reset, switchShare{left: 2, back: 7}, time.Now()) {
 		t.Fatal("a five-hour window whose reset passed is spent")
 	}
 }

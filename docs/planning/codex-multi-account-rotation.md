@@ -524,6 +524,128 @@ and the whole GUI suite, not only the accounts page's.
   "refresh where the account is held" (decision (b)) rather than "copy into
   magpie" (decision (a)).
 
+## The share the sign-in moves off at is the user's
+
+The plan wrote the share down: an account is moved off with 15% of its
+five-hour window left, so the next account has a window's worth of room to
+be used in. That number is the user's, so it is not written in the code:
+
+- **Where it is told.** `~/.config/magpie/.env`, as
+  `MAGPIE_SWITCH_LEFT` for a window that runs over again within the day
+  (Codex's and Claude Code's five hours) and `MAGPIE_SWITCH_LEFT_LONG` for
+  one that doesn't (a week, a month). The environment has the last word
+  over the file. `magpie accounts switch-left [<share>] [rolling|long]`
+  says the shares and sets them.
+- **The defaults.** 15% of a rolling window left, 2% of a long one.
+- **How the windows are told apart.** By how long they run, not by name:
+  a window that runs over again within the day is a rolling one, a longer
+  one is a long one. So the rule reaches every subscription that has
+  windows, not only Codex's.
+- **The account comes back further from the edge.** 5 points beyond the
+  share it was moved off at, so the sign-in does not go back and forth
+  there. A share within 5 points of the whole comes back at the same share
+  (it is held rather than flapping).
+- **A change takes effect at once.** The `.env` is read again when the file
+  has changed, and the sign-in's move is decided every five minutes.
+
+`internal/provider/switch_config.go` holds it;
+`internal/provider/switch_config_test.go` and
+`internal/provider/switch_share_test.go` hold the guarantees, and the page
+says the share the user told rather than one of its own.
+
+## Verified on 2026-11-05
+The plan is built. Each step was checked against the source and against the
+machine it was built for:
+
+| Step | Where it lives | Checked |
+| --- | --- | --- |
+| 1. The multicodex profiles are found | `internal/appdir/multicodex.go` | `TestMulticodexHomesIn`, `TestMulticodexHomesWithoutAConfig`; on the machine, `~/.codex` and the four profiles are found, each under the name multicodex gives it |
+| 2. One holder of a refresh token | `internal/provider/codex_takeover.go` | `TestTakenOverCodexAccountIsMagpiesAlone`, `TestTakenOverCodexAccountIsRefreshedInMagpiesCopy`, `TestTakenOverCodexAccountLeavesItsFolderAlone` |
+| 3. The 5-hour window drives the rotation | `internal/provider/codex_fivehour.go`, `spentAt` | `TestCodexSwitchesWithFifteenPercentLeft`, `TestCodexComesBackOnlyWhenThereIsRoom` |
+| 4. The order is the user's | `internal/provider/account_order.go`, `magpie accounts order` | The order on the machine is work1, work2, work3, work4, local |
+| 5. The accounts are in magpie | `magpie accounts takeover` | `TestAccountsTakeover`; all five accounts are in `logins.json`, on, with the four team ones marked `taken` |
+| 6. Back to work1 when the window resets | `NextLogin` | `TestCodexAccountsTurnOverAsACycle` |
+| 7. The windows are read | `internal/provider/subscription_usage.go` | `magpie quota codex --json` reads the 5 hours and the week of every one of the five |
+| 8. The local account last | `savedLogin.Order` | The gateway's order is the same list (`alsoOn` reads `Logins`) |
+| 9. Readable in the GUI | `internal/gui/assets/app.js` | The page says Codex moves on with 15% of its five hours left, in four languages; `TestCoreScriptBudget` and the i18n suite pass |
+| 10. What the app and the CLI see | `internal/provider/codex_daemon.go` | `magpie accounts switch codex <email>` moves `~/.codex/auth.json`, and the profile folder it came from is byte-for-byte what it was |
+
+**The sign-in was moved and moved back by hand** on the machine, to see
+that the switch works and that no folder is written to: `enda@doinggroup.com`
+→ `onlinefirst001@gmail.com` → `enda@doinggroup.com`, with
+`~/.codex/auth.json` holding each account's credentials in turn and every
+profile folder's `auth.json` unchanged.
+
+**Run at this head** (2026-11-05, `ab19e9b6` plus the two fixes below):
+
+- `gofmt -l` on the changed packages: nothing.
+- `go vet ./...`, `GOOS=linux go vet -tags nogui ./...`, `GOOS=windows go vet
+  ./...`: ok.
+- `go build`, `GOOS=linux go build -tags nogui`, `GOOS=windows go build`: ok.
+- `go test -tags nogui ./internal/appdir ./internal/provider ./internal/cli
+  ./internal/gui`: ok.
+- The full suite: the failures are `TestUnreadLoginsWriteErrorsKeepCredentials`
+  (provider), `TestMarshalRawIsEncodingJSON`, `TestCodexFittedImagesPastTheBudget`
+  and `TestServeWSLListensBesideLoopback` (gateway) and `TestPluginSOCKSProxy`
+  (plugin). Each was checked at `main` and fails there too.
+- The GUI suite's `i18n-keys` in Chromium: ok.
+
+**Two fixes came out of the check:**
+
+1. The `takeover` command said the sign-in "stays in its multicodex folder
+   and is refreshed there", and that "no fresh sign-in is needed". The code
+   does the other thing: the folder is read, never written, and magpie's
+   copy in `logins.json` is the account's one holder of its refresh token.
+   The command now says so, and says that the account needs a fresh sign-in
+   in multicodex afterwards (`multicodex login <name>`) — which is what the
+   plan's step 2 and the subsystem page say.
+2. `ab19e9b6` grew `app.js` past its budget (`TestCoreScriptBudget`, in the
+   GUI package, red on this branch and green at `main`). The budget was
+   raised to the file's size, with the reason, as the standards ask.
+
+**Still to do by hand:** the released app is v0.1.1561, which does not know
+the `taken` field and writes `logins.json` without it, so the takeover has
+to be run with a build that knows it until this is released. The order and
+the accounts survive; the mark does not.
+
+## The share, run and checked
+
+The share the sign-in moves off an account at is now the user's, told in
+`~/.config/magpie/.env` (see above). It was checked on this machine and
+in the suite:
+
+- **The command.** `magpie accounts switch-left` says the two shares and
+  where they are kept; `magpie accounts switch-left 30` sets the rolling
+  one and `magpie accounts switch-left 5 long` the long one, and both are
+  read back by the next call. A share that isn't one is refused and
+  nothing is written.
+- **The sign-in follows it.** With `MAGPIE_SWITCH_LEFT=40` the sign-in
+  moves off an account with 40% of its five hours left, where the
+  default (15%) leaves it there (`TestTheToldShareDecidesWhenTheSignInMoves`).
+- **The page says the share it is**, in all four languages, and a share of
+  nothing (0) is said as 0 rather than left out: the payload's field is
+  always written, since an omitted one would have the page fall back to
+  the default (`TestProvidersSayTheShareTheUserTold`,
+  `TestProvidersSayAShareOfNothing`).
+
+**Run at this head** (2026-11-05, on top of `ab19e9b6`):
+
+- `gofmt -l` on the changed packages: nothing.
+- `go vet ./...`, `GOOS=linux go vet -tags nogui ./...`, `GOOS=windows go vet
+  ./...`: ok.
+- `go build`, `GOOS=linux go build -tags nogui`, `GOOS=windows go build`: ok.
+- `go test -tags nogui ./internal/appdir ./internal/provider ./internal/cli
+  ./internal/gui`: ok, except `TestUnreadLoginsWriteErrorsKeepCredentials`
+  (provider), which fails at `ab19e9b6` too ("close of synctest channel
+  from outside bubble") and is not this work's.
+- The GUI suite's `routing-signin`, `switch-only`, `account-return` and
+  `keep-login` in Chromium and WebKit, and `i18n-keys`: ok.
+
+**One fix came out of the check:** the payload's share was left out when
+it was 0, so a user who told "0" would have seen the default (15) on the
+page instead. The field is always written now, and the two tests above
+are red without it.
+
 ## Open Questions
 
 **Answered while the work was done:**

@@ -104,7 +104,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         "magpie moves {agent} to an account with room again",
         "Routing picks the account for each request through magpie; {agent} on its own stays signed in to the first account, whatever it has left.",
         "Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is used up, and back to the first once that has room again.",
-        "Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have 15% left, and back to the first once that has room again.",
+        "Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have {left}% left, and back to the first once that has room again.",
       ].filter((k) => !I18N.zh[k]));
       assert.deepEqual(missing, [], "every string has its Chinese");
       const top = await page.evaluate(() => document.scrollingElement.scrollTop);

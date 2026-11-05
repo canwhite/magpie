@@ -86,11 +86,13 @@ func TestCodexSwitchedWhenUsedUp(t *testing.T) {
 	}
 }
 
-// Claude Code signed in to an account Smart counts spent (98%) is signed
-// in to the next account that is on and has room — its credentials and
-// .claude.json's account both — and not before (#208, #209). What it
-// goes by is what Claude Code told as it answered: Anthropic's usage
-// endpoint isn't read for it.
+// Claude Code signed in to an account whose five-hour window is spent is
+// signed in to the next account that is on and has room — its credentials
+// and .claude.json's account both — and not before (#208, #209). The
+// share it moves off at is the rolling one (switch_config.go), so the
+// next account has a window's worth of room to be used in. What it goes
+// by is what Claude Code told as it answered: Anthropic's usage endpoint
+// isn't read for it.
 func TestClaudeSwitchedWhenSpent(t *testing.T) {
 	home := claudeHome(t)
 	cred := claudeSignIn(t, home, time.Now().Add(time.Hour)) // sk-ant-oat01-old
@@ -107,7 +109,7 @@ func TestClaudeSwitchedWhenSpent(t *testing.T) {
 	}
 	loginsMu.Unlock()
 
-	used := map[string]float64{"a@example.com": 97, "b@example.com": 10}
+	used := map[string]float64{"a@example.com": 84, "b@example.com": 10}
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("usage endpoint read: %s", r.URL)
 	}))
@@ -131,13 +133,16 @@ func TestClaudeSwitchedWhenSpent(t *testing.T) {
 		return to
 	}
 
-	// 97%: Smart still counts it low, not spent
+	// 84% used is 16% left: more than the rolling share, so the account
+	// is still on
 	if to := switched(); to != "" {
-		t.Fatalf("switched to %s at 97%%", to)
+		t.Fatalf("switched to %s at 84%%", to)
 	}
-	used["a@example.com"] = 98
+	// 85% used is 15% left: the rolling share, so the account is moved
+	// off
+	used["a@example.com"] = 85
 	if to := switched(); to != "b@example.com" {
-		t.Fatalf("switched to %q at 98%%", to)
+		t.Fatalf("switched to %q at 85%%", to)
 	}
 	var c map[string]any
 	readJSON(cred, &c)

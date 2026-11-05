@@ -25,32 +25,6 @@ import (
 // codexFiveHourSpan is how long a ChatGPT account's five-hour window runs.
 const codexFiveHourSpan = 5 * time.Hour
 
-// codexSwitchLeft is the share of the five-hour window that is left when
-// the sign-in moves off an account: 15, so the account is moved off at
-// 85% used.
-//
-// A turn that starts only when the account is used up leaves the next
-// account no room to be of use: the window that was there when the turn
-// began is gone by the time the account is exhausted, and the next
-// account's own window has run for nothing. Moving off at 85% leaves the
-// next account a window's worth of room to be used in.
-//
-// It is below what is left of the window when the account comes back
-// (codexBackShare, so 20% left), so the sign-in does not go back and
-// forth at the edge: an account moved off with 15% left is back only
-// once it has 20% left again.
-const codexSwitchLeft = 15
-
-// codexSwitchShare is the share of the five-hour window past which the
-// sign-in moves off an account: 100 - codexSwitchLeft, so 85.
-const codexSwitchShare = 100 - codexSwitchLeft
-
-// codexBackShare is the share below which the account the sign-in moved
-// off comes back to: under it there is room again. It is below the share
-// the account is moved off at (codexSwitchShare), so the two do not
-// overlap and the sign-in does not go back and forth at the edge.
-const codexBackShare = 80
-
 // codexFiveHourNames are the names a five-hour window goes by in a
 // reading, in lower case.
 var codexFiveHourNames = []string{"5 hours", "5 hour", "5h", "five hours", "five hour"}
@@ -96,12 +70,13 @@ func codexFiveHourWindow(w QuotaWindow) bool {
 }
 
 // codexFiveHourSpent says whether the account's five-hour window is used
-// up at share, or so near it that it is spent for the sign-in's move.
+// up at the share s, or so near it that it is spent for the sign-in's
+// move.
 //
 // A reading that says nothing of the five hours is not a spent one: the
 // account is unknown, not out. The week's window is not read here: it
 // removes an account of its own accord (codexFiveHourOut).
-func codexFiveHourSpent(q SubscriptionQuota, share float64, now time.Time) bool {
+func codexFiveHourSpent(q SubscriptionQuota, s switchShare, now time.Time) bool {
 	w, ok := codexFiveHour(q)
 	if !ok {
 		return false
@@ -110,7 +85,23 @@ func codexFiveHourSpent(q SubscriptionQuota, share float64, now time.Time) bool 
 		// the window started again, whatever share it was read at
 		return false
 	}
-	return w.Used >= share
+	return w.Used >= s.used()
+}
+
+// codexFiveHourRoom says whether the account's five-hour window has room
+// again at the share s: under it, there is room to be of use. It is the
+// share further from the edge than the one the account was moved off at,
+// so the sign-in does not go back and forth at the edge.
+func codexFiveHourRoom(q SubscriptionQuota, s switchShare, now time.Time) bool {
+	w, ok := codexFiveHour(q)
+	if !ok {
+		return false
+	}
+	if resetPassed(w, now) {
+		// the window started again, whatever share it was read at
+		return true
+	}
+	return w.Used < s.usedBack()
 }
 
 // codexFiveHourOut says whether the account is out of both windows: its

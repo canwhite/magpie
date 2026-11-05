@@ -13,24 +13,19 @@ package provider
 // that is on and has room, as switching it on the Accounts page would: a
 // session started after that is on it from the first turn.
 //
-// It moves at the share Smart routing counts an account spent at, so the
-// account the agent is signed in to and the one the gateway goes to agree
-// on which is out (#209): the sign-in follows Smart; Smart doesn't follow
-// the sign-in. In order, the gateway goes to the first until it is used
-// up or refused, so the sign-in moves only once it is used up (#530).
-//
-// Codex is the exception: it moves off its account with 15% of its
-// five-hour window left (codexSwitchLeft), not when it is used up, so
-// the next account has a window's worth of room to be used in. The
-// gateway's own share is unchanged (switchShares).
+// It moves at the share the user told (switch_config.go): the share of
+// the account's window left when the sign-in moves off it. A rolling
+// window (Codex's and Claude Code's five hours) moves early, with 15% of
+// it left by default, so the next account has a window's worth of room to
+// be used in; a long one (a week, a month) is scarce and is held until
+// it is nearly spent.
 //
 // The account it moved from is the one the user made first, and it stays
-// that: once it is no longer low (backShare, and codexBackShare for
-// Codex) the agent is signed back in to it, as Smart gives it requests
-// again then (#408). A switch the user makes meanwhile ends that. With
-// KeepLogin on the subscription, the agent stays signed in to the first,
-// whatever it has left (#524); with KeepLoginAs, to that account,
-// wherever it stands in the order.
+// that: once it has room again, further from the edge than the share it
+// was moved off at, the agent is signed back in to it (#408). A switch
+// the user makes meanwhile ends that. With KeepLogin on the subscription,
+// the agent stays signed in to the first, whatever it has left (#524);
+// with KeepLoginAs, to that account, wherever it stands in the order.
 
 import (
 	"context"
@@ -79,32 +74,19 @@ func loginSwitching(agent string) (share float64, keep bool) {
 	return SpentShare, false
 }
 
-// switchShares are the shares the sign-in's move is decided on: the share
-// the account it is on is moved off at, the share the account it moved off
-// comes back at, and whether it is kept on the first instead (KeepLogin).
+// switchLeftFor is the share of the agent's window left when the sign-in
+// moves off the account it is on, as the log says it.
 //
-// For Codex they are the five-hour window's own (codex_fivehour.go): the
-// account is moved off with codexSwitchLeft of its window left, so the
-// next account has a window's worth of room to be used in, and it comes
-// back only once it is under codexBackShare, further from the edge than
-// the share it was moved off at, so the two do not overlap and the
-// sign-in does not go back and forth at the edge.
-//
-// Every other subscription keeps the shares it had: the share Smart
-// routing counts an account spent at (loginSwitching's), and backShare.
-func switchShares(agent string) (move, back float64, keep bool) {
-	move, keep = loginSwitching(agent)
-	back = backShare
+// Codex is the one that moves off its rolling window (its five hours); a
+// rolling window is what every other switched agent has too, so the
+// rolling share is the one said.
+func switchLeftFor(agent string) float64 {
+	span := switchRollingSpan
 	if agent == "codex" {
-		move, back = codexSwitchShare, codexBackShare
+		span = codexFiveHourSpan
 	}
-	return move, back, keep
+	return switchShareFor(span).left
 }
-
-// backShare is the share below which the account magpie moved the agent
-// off is signed back in to: no longer low, as Smart counts it (the
-// gateway's lowShare), so it doesn't go back and forth at the edge.
-const backShare = 90
 
 // switchedAgents are the agents whose account magpie moves on.
 var switchedAgents = []string{"codex", "claude"}
@@ -165,6 +147,46 @@ func usedPast(q SubscriptionQuota, share float64, now time.Time) bool {
 	return false
 }
 
+// spentPast reports whether one of q's windows that stop the account for
+// every model is spent at now, each at the share of its own kind
+// (switch_config.go): a rolling window (Codex's and Claude Code's five
+// hours) at the rolling share, a long one (a week, a month) at the long
+// share.
+//
+// The two kinds are told apart by how long the window runs, so a window
+// that does not say how long it runs is read at the long share: a rolling
+// one always says (Codex's and Claude Code's both do).
+func spentPast(q SubscriptionQuota, now time.Time) bool {
+	return windowsPast(q, now, func(s switchShare) float64 { return s.used() })
+}
+
+// roomPast reports whether one of q's windows that stop the account for
+// every model has room again at now, each at the share of its own kind
+// (switch_config.go).
+//
+// The account has room when none of its windows is past its own back
+// share: a rolling window (Codex's and Claude Code's five hours) at the
+// rolling one, a long one (a week, a month) at the long one. A window of
+// one kind does not hold the account back because of the other.
+func roomPast(q SubscriptionQuota, now time.Time) bool {
+	return !windowsPast(q, now, func(s switchShare) float64 { return s.usedBack() })
+}
+
+// windowsPast reports whether one of q's windows that stop the account
+// for every model is at the share share says or past it, at now.
+func windowsPast(q SubscriptionQuota, now time.Time, share func(switchShare) float64) bool {
+	for _, w := range q.Windows {
+		if w.Aside || w.Model != "" {
+			continue
+		}
+		s := switchShareFor(w.Span)
+		if w.Used >= share(s) && !resetPassed(w, now) {
+			return true
+		}
+	}
+	return false
+}
+
 // NextLogin is the account agent should be signed in to instead of the
 // one it is on: the account magpie moved it off, once that has room again
 // (back); else, when the one it is on is spent, the first of its other
@@ -203,7 +225,7 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	}
 	// kept on the first, the agent goes back to it at once, however little
 	// that has left (#524)
-	moveAt, backAt, keep := switchShares(agent)
+	_, keep := loginSwitching(agent)
 	if keep && first != nil && first.On && first.Lapsed == "" {
 		return from, first.User, true, true
 	}
@@ -220,7 +242,7 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// nothing for it, and a workspace seat at its owner's limit or a spend
 	// cap is held with every window under the share
 	if first != nil && first.On && first.Lapsed == "" {
-		if q, known := u[first.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, backAt, now) && !capped(first.User, q) {
+		if q, known := u[first.User]; known && q.Error == "" && !q.Held && roomAt(agent, q, now) && !capped(first.User, q) {
 			return from, first.User, true, true
 		}
 	}
@@ -229,44 +251,51 @@ func NextLogin(ctx context.Context, agent string) (from, to string, back, ok boo
 	// A window whose reset has passed counts as started again (usedPast),
 	// on every account, however its reading came.
 	//
-	// For Codex the share is the five-hour window's own (switchShares):
-	// the sign-in moves off an account that has codexSwitchLeft of it
-	// left, so the next account has a window's worth of room to be used
-	// in.
+	// The share is the one the user told (switch_config.go): for Codex
+	// the five-hour window's own, so the sign-in moves off an account
+	// that has that share of it left, and the next account has a
+	// window's worth of room to be used in.
 	q, known := u[from]
-	if keep || !known || q.Error != "" || !q.Held && !spentAt(agent, q, moveAt, now) && !capped(from, q) {
+	if keep || !known || q.Error != "" || !q.Held && !spentAt(agent, q, now) && !capped(from, q) {
 		return "", "", false, false
 	}
 	for _, l := range spares {
-		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, moveAt, now) && !capped(l.User, q) {
+		if q, known := u[l.User]; known && q.Error == "" && !q.Held && !spentAt(agent, q, now) && !capped(l.User, q) {
 			return from, l.User, false, true
 		}
 	}
 	return "", "", false, false
 }
 
-// spentAt says whether the account's allowance is used up at share, as the
-// sign-in's move reads it.
+// spentAt says whether the account's allowance is spent, as the sign-in's
+// move reads it: the account is moved off when it is spent.
 //
-// For Codex the five-hour window is the one that counts (codex_fivehour.go):
-// an account whose week is fresh but whose five hours are gone is spent,
-// and one whose five hours are fresh is not, whatever its week says. The
-// week still removes an account of its own accord, for it is out of both
-// then.
+// Every window that stops the account counts, each at the share of its own
+// kind (switch_config.go): a rolling window (Codex's and Claude Code's
+// five hours) at the rolling share, a long one (a week, a month) at the
+// long share.
 //
-// The five hours are not read the way the other windows are, though: the
-// sign-in moves off an account that has codexSwitchLeft of them left, so
-// the next account has a window's worth of room to be used in. The caller
-// says which share it means (switchShares': codexSwitchShare to move off,
-// codexBackShare to come back to).
-//
-// Every other subscription keeps the reading it had: any window that
-// stops the account at share.
-func spentAt(agent string, q SubscriptionQuota, share float64, now time.Time) bool {
+// Codex is the exception: the sign-in moves off its five hours, and its
+// week is only read when the week is spent (codexFiveHourOut), for then
+// the account is out of both.
+func spentAt(agent string, q SubscriptionQuota, now time.Time) bool {
 	if agent == "codex" {
-		return codexFiveHourSpent(q, share, now) || codexFiveHourOut(q, now)
+		return codexFiveHourSpent(q, switchShareFor(codexFiveHourSpan), now) || codexFiveHourOut(q, now)
 	}
-	return usedPast(q, share, now)
+	return spentPast(q, now)
+}
+
+// roomAt says whether the account has room again, as the sign-in's move
+// reads it: the account magpie moved off is signed back in to once it has
+// room, at the share further from the edge than the one it was moved off
+// at (switch_config.go), so the sign-in does not go back and forth at the
+// edge.
+func roomAt(agent string, q SubscriptionQuota, now time.Time) bool {
+	if agent == "codex" {
+		s := switchShareFor(codexFiveHourSpan)
+		return codexFiveHourRoom(q, s, now) && !codexFiveHourOut(q, now)
+	}
+	return roomPast(q, now)
 }
 
 // SwitchWhenSpent signs agent in to the next of its accounts when the one
@@ -296,8 +325,8 @@ func SwitchWhenSpent(ctx context.Context, agent string) (string, error) {
 		}
 		r.To = to
 		setLoginReturn(agent, r)
-		share, _, _ := switchShares(agent)
-		log.Printf("%s: %s has used %g%% or more of its allowance; signed it in to %s", agent, from, share, to)
+		left := switchLeftFor(agent)
+		log.Printf("%s: %s has %g%% or less of its allowance left; signed it in to %s", agent, from, left, to)
 	}
 	if agent == "codex" {
 		if was := CodexAppStale(); was != "" {

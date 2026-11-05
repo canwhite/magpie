@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +32,7 @@ func accountsCmd(args []string) error {
 	if len(args) > 1 && args[1] == "discovery" {
 		return accountsDiscoveryCmd(args[2:])
 	}
-	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off] | magpie accounts takeover [profile...] | magpie accounts order <agent> <email>..."
+	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off] | magpie accounts takeover [profile...] | magpie accounts order <agent> <email>... | magpie accounts switch-left [<share>] [rolling|long]"
 	agentID := func(s string) (string, error) {
 		switch strings.ToLower(s) {
 		case "claude", "cc":
@@ -128,6 +129,9 @@ func accountsCmd(args []string) error {
 	}
 	if len(args) > 1 && args[1] == "order" {
 		return orderAccounts(args[2:])
+	}
+	if len(args) > 1 && args[1] == "switch-left" {
+		return switchLeftAccounts(args[2:])
 	}
 	if len(args) > 1 && args[1] == "checkin" {
 		return checkinWorkBuddy(len(args) > 2 && args[2] == "--json")
@@ -916,24 +920,27 @@ func switchOnlyCmd(args []string) error {
 // order, so magpie may switch to the account and turn the accounts over on
 // their five-hour quota.
 //
-// The sign-in stays in the multicodex folder and is refreshed there, as it
-// is for any account another Codex folder keeps: one refresh token, one
-// holder. So multicodex keeps working with the account it had, and no
-// fresh sign-in is ever needed — not now, and not when magpie signs the
-// agent in to the account and back again.
+// The multicodex folder is read, never written: the sign-in stays in the
+// file as it was, and magpie's copy in logins.json is the account's one
+// holder of its refresh token, so the two never sign each other out.
+// magpie's refresh spends the token the folder holds, so that account
+// needs a fresh sign-in in multicodex afterwards (multicodex login
+// <name>): the takeover says so before it happens.
 func takeoverAccounts(args []string) error {
 	names := args
 	if len(names) == 1 && names[0] == "--help" {
 		fmt.Println("usage: magpie accounts takeover [profile...]")
 		fmt.Println("Takes the ChatGPT accounts multicodex holds into magpie, so magpie may switch")
 		fmt.Println("to them and turn them over on their five-hour quota.")
-		fmt.Println("Each sign-in stays in its multicodex folder and is refreshed there: one")
-		fmt.Println("refresh token, one holder. multicodex keeps working with the accounts it")
-		fmt.Println("had, and no fresh sign-in is needed.")
+		fmt.Println("Each multicodex folder is read, never written: magpie keeps its own copy")
+		fmt.Println("of the sign-in and refreshes that, so the two never hold one refresh token.")
+		fmt.Println("Each account taken over then needs a fresh sign-in in multicodex:")
+		fmt.Println("multicodex login <name>.")
 		return nil
 	}
 	fmt.Println(bold.Render("!"), "magpie takes each account over, to switch to it and to order it.")
-	fmt.Println(" ", muted.Render("Each sign-in stays in its multicodex folder and is refreshed there: multicodex keeps working with the accounts it had, and no fresh sign-in is needed."))
+	fmt.Println(" ", muted.Render("Each multicodex folder is read, never written: magpie keeps its own copy of the sign-in and refreshes that, so the two never hold one refresh token."))
+	fmt.Println(" ", muted.Render("Each account taken over then needs a fresh sign-in in multicodex: multicodex login <name>."))
 	ctx, stop := interruptContext()
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -1000,5 +1007,52 @@ func orderAccounts(args []string) error {
 	for i, u := range ordered {
 		fmt.Printf("%d. %s\n", i+1, u)
 	}
+	return nil
+}
+
+// switchLeftAccounts: `magpie accounts switch-left [<share>] [rolling|long]`
+// says the share of an account's window left when the sign-in moves off
+// it, and with a share told it sets it.
+//
+// The share is the user's, so it is kept in the .env beside magpie's own
+// files (provider.SetSwitchLeft), where they can change it themselves.
+func switchLeftAccounts(args []string) error {
+	if len(args) == 1 && args[0] == "--help" {
+		fmt.Println("usage: magpie accounts switch-left [<share>] [rolling|long]")
+		fmt.Println("The share of an account's window left when the sign-in moves off it.")
+		fmt.Println("A rolling window (Codex's and Claude Code's five hours) moves early, so the")
+		fmt.Println("next account has a window's worth of room; a long one (a week, a month)")
+		fmt.Println("is scarce and is held until it is nearly spent.")
+		return nil
+	}
+	kind := "rolling"
+	rest := args
+	if len(rest) > 0 {
+		switch strings.ToLower(rest[len(rest)-1]) {
+		case "rolling", "long":
+			kind = strings.ToLower(rest[len(rest)-1])
+			rest = rest[:len(rest)-1]
+		}
+	}
+	if len(rest) == 0 {
+		rolling, long := provider.SwitchLeftRolling(), provider.SwitchLeftLong()
+		if kind == "long" {
+			fmt.Printf("a long window (a week, a month): %g%% left\n", long)
+		} else {
+			fmt.Printf("a rolling window (five hours): %g%% left\n", rolling)
+			fmt.Printf("a long window (a week, a month): %g%% left\n", long)
+		}
+		fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath()))
+		return nil
+	}
+	share, err := strconv.ParseFloat(strings.TrimSpace(rest[0]), 64)
+	if err != nil {
+		return fmt.Errorf("%q isn't a share of a window (0 to 100)", rest[0])
+	}
+	if err := provider.SetSwitchLeft(kind, share); err != nil {
+		return err
+	}
+	fmt.Println(green.Render("✓"), "the sign-in now moves off an account with", share, "% of its", kind, "window left")
+	fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath() + " · it takes effect at the next look"))
 	return nil
 }

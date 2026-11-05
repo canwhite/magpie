@@ -11912,21 +11912,20 @@ function renderRouting(p) {
   const affinityNow = () => draft.affinity ?? (p.affinity || "");
   const sinkNow = () => draft.sink ?? !!p.sink;
   // what Codex or Claude Code sends past magpie goes to the account it is
-  // signed in to, which magpie moves on once Smart would count it spent
-  // and back once the first has room (provider.KeepOnAnAccountWithRoom,
-  // #209, #408). Codex is the exception: it moves on with 15% of its
-  // five hours left, so the next account has a window's worth of room
-  // (provider.codexSwitchLeft).
+  // signed in to, which magpie moves on once its window is spent and back
+  // once the first has room (provider.KeepOnAnAccountWithRoom, #209,
+  // #408). The share it moves on at is the user's (MAGPIE_SWITCH_LEFT in
+  // magpie's .env), so the page says the share it is, not one of its own.
   const a = p.account;
-  // — at 98%, In order once used up (#530), never when kept on the first (#524).
-  // Codex moves on at 15% of its five hours in either routing.
+  // — at the share the user told, never when kept on the first (#524).
+  const switchLeft = Math.round(providers?.switchLeft ?? 15);
   const own = (routing) => !a || (a.agent !== "codex" && a.agent !== "claude") ? ""
     : " " + (keptLogin(p)
       ? t("Routing picks the account for each request through magpie, in the accounts' order; {agent} on its own stays signed in to {user}, whatever it has left.", { agent: a.agentName, user: keptLogin(p) })
       : p.keepLogin
       ? t("Routing picks the account for each request through magpie; {agent} on its own stays signed in to the first account, whatever it has left.", { agent: a.agentName })
-      : a.agent === "codex"
-        ? t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have 15% left, and back to the first once that has room again.", { agent: a.agentName })
+      : a.agent === "codex" || a.agent === "claude"
+        ? t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have {left}% left, and back to the first once that has room again.", { agent: a.agentName, left: switchLeft })
         : routing === "order"
         ? t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is used up, and back to the first once that has room again.", { agent: a.agentName })
         : t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is 98% used, and back to the first once that has room again.", { agent: a.agentName }));
@@ -13227,7 +13226,7 @@ function renderAccounts(a, p) {
   if (a.agent === "codex" && several && p) {
     const box = el("div", "switch-only");
     const [only, cb] = tick(t("Only switch {agent}'s sign-in", { agent: a.agentName }), !!p.switchOnly);
-    only.title = t("magpie signs {agent} in to the next account with room when the one it is on has 15% of its five hours left, and back once that has room again, by writing {agent}'s own sign-in; {agent}'s requests go straight to OpenAI, never through magpie. A {agent} app or session already open stays on its account until it is opened again. Connected to magpie, {agent}'s requests go through it as before.", { agent: a.agentName });
+    only.title = t("magpie signs {agent} in to the next account with room when the one it is on has {left}% of its five hours left, and back once that has room again, by writing {agent}'s own sign-in; {agent}'s requests go straight to OpenAI, never through magpie. A {agent} app or session already open stays on its account until it is opened again. Connected to magpie, {agent}'s requests go through it as before.", { agent: a.agentName, left: Math.round(providers?.switchLeft ?? 15) });
     cb.onchange = () => accountAction("provider/switchonly", { id: p.id, switchOnly: cb.checked }, cb.checked
       ? t("magpie only switches {agent}'s sign-in; its requests go straight to OpenAI", { agent: a.agentName })
       : t("{agent}'s requests go through magpie to fail over to your other accounts again", { agent: a.agentName }));
