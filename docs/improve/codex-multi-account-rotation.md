@@ -237,6 +237,7 @@ launchd 服务 `com.yetone.magpie.serve` 已 bootout（plist 仍在，重新登�
 
 | 目标 | 做什么 |
 | --- | --- |
+| `make help` | 列出 Makefile 的所有目标（目标行以 `##` 结尾的说明） |
 | `make serve` | 按账号现状启动网关，前台运行，`SERVE_ADDR`（默认 `0.0.0.0:3425`）可覆盖 |
 | `make serve-multicodex` | 先把非 multicodex 来源的 Codex 账号停用，再启动；只留 `work1`–`work4` 参与路由和轮换 |
 | `make codex-own-on` | 把非 multicodex 的账号重新启用 |

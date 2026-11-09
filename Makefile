@@ -32,18 +32,25 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve serve-multicodex codex-own-on close
+.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve serve-multicodex codex-own-on close
 
-build:
+# The targets this file offers. Each line below ends with ## and what the
+# target does, which this prints; a target added without one is left out.
+help: ## list these targets
+	@awk 'BEGIN { print "usage: make <target>"; print ""; print "targets:" } \
+	  /^[a-zA-Z0-9_-]+:.*## / { t = $$0; sub(":.*", "", t); d = $$0; sub("^[^#]*## ", "", d); printf "  %-20s %s\n", t, d }' \
+	  $(MAKEFILE_LIST)
+
+build: ## build magpie with its GUI (native, cgo)
 	go build -tags "$(TAGS)" -trimpath -ldflags="$(LDFLAGS)" -o magpie .
 
-cli:
+cli: ## build the terminal-only magpie (cross-compiles anywhere)
 	CGO_ENABLED=0 go build -tags nogui -trimpath -ldflags="$(LDFLAGS)" -o magpie .
 
-install:
+install: ## install magpie onto GOPATH/bin
 	go install -tags "$(TAGS)" -trimpath -ldflags="$(LDFLAGS)" .
 
-test:
+test: ## go vet and go test every package
 	go vet -tags "$(TAGS)" ./... && go test -tags "$(TAGS)" ./...
 
 # The browser regressions under internal/gui/tests: the real pages in
@@ -52,12 +59,12 @@ UI_TESTS = $(wildcard internal/gui/tests/*.test.cjs)
 # Files are independent and run in parallel; 1 diagnoses a flaky one.
 UI_TEST_CONCURRENCY ?= 2
 
-test-ui:
+test-ui: ## run the GUI's browser tests (Playwright)
 	@test -n "$(UI_TESTS)" || { echo "no GUI tests found under internal/gui/tests" >&2; exit 1; }
 	node --test --test-concurrency=$(UI_TEST_CONCURRENCY) $(UI_TESTS)
 
 # macOS bundle: menu bar app with no Dock icon (LSUIElement).
-app: build
+app: build ## build the macOS app bundle (magpie.app)
 	@rm -rf magpie.app
 	@mkdir -p magpie.app/Contents/MacOS magpie.app/Contents/Resources
 	@cp magpie magpie.app/Contents/MacOS/magpie
@@ -66,7 +73,7 @@ app: build
 	@sed 's/@VERSION@/$(VERSION)/' build/darwin/Info.plist > magpie.app/Contents/Info.plist
 	@echo "  magpie.app"
 
-icons:
+icons: ## regenerate the tray and app icons
 	@go run build/icon/gen.go tray internal/gui/tray.png
 	@go run build/icon/gen.go tray-flap internal/gui/trayflap
 	@go run build/icon/gen.go app 64 internal/gui/icon.png
@@ -86,12 +93,12 @@ icons:
 		--minimum-deployment-target 11.0 --app-icon AppIcon --output-partial-info-plist build/darwin/actool/partial.plist >/dev/null
 	@mv build/darwin/actool/Assets.car build/darwin/Assets.car && rm -rf build/darwin/actool
 
-release: clean build
+release: clean build ## build the desktop app and the CLI binaries into dist
 	@mkdir -p dist
 	@cp magpie dist/magpie-$(shell go env GOOS)-$(shell go env GOARCH)
 	@$(MAKE) --no-print-directory release-cli
 
-release-cli:
+release-cli: ## build the terminal-only binaries for every platform into dist
 	@mkdir -p dist
 	@for t in $(TARGETS); do \
 		os=$${t%/*}; arch=$${t#*/}; ext=""; [ $$os = windows ] && ext=.exe; \
@@ -103,7 +110,7 @@ release-cli:
 # arches cross-compile. Linked as a GUI program (no console window), with
 # the icon, version and a DPI-aware manifest from build/windows.
 WINVER = $(shell echo $(VERSION) | sed -E 's/^v//; s/[^0-9.].*//')
-release-windows:
+release-windows: ## build the Windows desktop app into dist
 	@mkdir -p dist
 	@go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --arch amd64,arm64 --out rsrc \
 		--file-version "$(or $(WINVER),0.0.0)" --product-version "$(or $(WINVER),0.0.0)"
@@ -114,12 +121,12 @@ release-windows:
 
 # The desktop app for Linux links GTK 3 and WebKitGTK 4.1 through cgo, so it
 # is built natively, one arch per machine.
-release-linux:
+release-linux: ## build the Linux desktop app into dist
 	@mkdir -p dist
 	@echo "  linux/$(shell go env GOARCH) (app)"
 	@go build -tags "$(TAGS)" -trimpath -ldflags="$(LDFLAGS)" -o dist/magpie-linux-$(shell go env GOARCH) .
 
-clean:
+clean: ## remove built binaries and bundles
 	rm -rf magpie magpie.exe magpie.app dist rsrc_windows_*.syso
 
 # Startup: the gateway this machine serves, in the foreground (Ctrl+C
@@ -134,21 +141,21 @@ clean:
 # `make codex-own-on`.
 SERVE_ADDR ?= 0.0.0.0:3425
 
-serve: cli
+serve: cli ## run the gateway in the foreground (SERVE_ADDR, default 0.0.0.0:3425)
 	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
-serve-multicodex: cli
+serve-multicodex: cli ## run the gateway with only multicodex's accounts in use
 	./magpie accounts off codex --except-multicodex
 	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
-codex-own-on: cli
+codex-own-on: cli ## put the machine's own Codex accounts back in use
 	./magpie accounts on codex --except-multicodex
 
 # Stop every magpie service this machine runs: the gateway on SERVE_ADDR
 # (whichever of the starts above brought it up, or a run by hand) and the
 # launchd service when its plist is loaded. The gateway is asked to stop
 # first, and killed if it is still there after ten seconds.
-close:
+close: ## stop the gateway and the launchd service
 	@launchctl bootout gui/$$(id -u)/com.yetone.magpie.serve 2>/dev/null || true
 	@addr=$(SERVE_ADDR); port=$${addr##*:}; \
 	pids=$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null); \
@@ -168,11 +175,11 @@ DEV_ADDR ?= 127.0.0.1:3426
 DEV_UI ?= 127.0.0.1:3427
 DEV_BACKEND ?= 127.0.0.1:3428
 DEV_CONTROL ?= 127.0.0.1:3429
-dev:
+dev: ## run the GUI with live reload, on its own ports
 	@if command -v fswatch >/dev/null; then \
 	  MAGPIE_ADDR=$(DEV_ADDR) MAGPIE_DEV_UI=$(DEV_UI) MAGPIE_DEV_BACKEND=$(DEV_BACKEND) MAGPIE_DEV_CONTROL=$(DEV_CONTROL) build/dev.sh; \
 	else $(MAKE) --no-print-directory dev-once; fi
 
-dev-once:
+dev-once: ## run one development build of the GUI, without live reload
 	@go build -tags dev -o magpie-dev . && echo "  magpie-dev · UI from internal/gui/assets, reload on save · gateway $(DEV_ADDR)"
 	@MAGPIE_ADDR=$(DEV_ADDR) MAGPIE_DEV_UI=$(DEV_UI) ./magpie-dev app
