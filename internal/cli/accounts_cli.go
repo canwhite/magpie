@@ -32,7 +32,7 @@ func accountsCmd(args []string) error {
 	if len(args) > 1 && args[1] == "discovery" {
 		return accountsDiscoveryCmd(args[2:])
 	}
-	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off] | magpie accounts takeover [profile...] | magpie accounts order <agent> <email>... | magpie accounts switch-left [<share>] [rolling|long]"
+	const usage = "usage: magpie accounts [claude|codex|grok|copilot|gemini|antigravity|zed|factory|mimo|<plugin>] [--json] | magpie accounts add <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> | magpie accounts add copilot [--host <name>.ghe.com] | magpie accounts import <codex|claude|antigravity|factory> <file>... [--yes] | magpie accounts refresh [--json] | magpie accounts checkin [--json] | magpie accounts switch|forget <claude|codex|gemini|antigravity|zed|factory|mimo|<plugin>> <email> | magpie accounts switch|forget copilot <login>[@<name>.ghe.com] [--host <name>.ghe.com] | magpie accounts project <gemini|antigravity> <email> <gcp-project-id> | magpie accounts alias <agent|<plugin>> <email> [<name>|--clear] | magpie accounts switch-only codex [on|off] | magpie accounts on|off <agent> <email> [--except-multicodex] | magpie accounts takeover [profile...] | magpie accounts order <agent> <email>... | magpie accounts switch-left [<share>] [rolling|long]"
 	agentID := func(s string) (string, error) {
 		switch strings.ToLower(s) {
 		case "claude", "cc":
@@ -117,6 +117,27 @@ func accountsCmd(args []string) error {
 	}
 	if len(args) > 1 && args[1] == "switch-only" {
 		return switchOnlyCmd(args[2:])
+	}
+	if len(args) > 1 && (args[1] == "on" || args[1] == "off") {
+		on := args[1] == "on"
+		if len(args) == 4 && args[3] == "--except-multicodex" {
+			id, err := agentID(args[2])
+			if err != nil {
+				return err
+			}
+			if id != "codex" {
+				return fmt.Errorf("--except-multicodex names Codex's accounts")
+			}
+			return loginOnExceptMulticodex(on)
+		}
+		if len(args) != 4 {
+			return fmt.Errorf("usage: magpie accounts on|off <agent> <email> | magpie accounts on|off codex --except-multicodex")
+		}
+		id, err := agentID(args[2])
+		if err != nil {
+			return err
+		}
+		return loginOnCmd(on, id, args[3])
 	}
 	if len(args) > 1 && args[1] == "import" {
 		return importAccounts(args[2:])
@@ -911,6 +932,76 @@ func switchOnlyCmd(args []string) error {
 	} else {
 		fmt.Println(green.Render("✓"), "with more of its accounts on, Codex's requests go through magpie to fail over between them again")
 	}
+	return nil
+}
+
+// loginOnCmd is `magpie accounts on|off <agent> <email>`: puts a saved
+// account in use beside the one the agent is signed in to, or takes it
+// out. Off on the account the agent is signed in to pauses it instead —
+// the agent stays signed in to it, passed over while another account is
+// on (the Accounts page's pause). The change is the one the page's dot
+// makes.
+func loginOnCmd(on bool, id, named string) error {
+	user, err := accountNamed(id, named)
+	if err != nil {
+		return err
+	}
+	moved, err := agent.Reseat(func() error { return provider.SetLoginOn(id, user, on) })
+	if err != nil {
+		return err
+	}
+	if on {
+		fmt.Println(green.Render("✓"), user, "is in use again for", id)
+	} else {
+		fmt.Println(green.Render("✓"), user, "is out of use for", id, muted.Render("· the agent stays signed in to the account it is on"))
+	}
+	printMoved(moved)
+	agent.SyncCatalogSoon()
+	return nil
+}
+
+// loginOnExceptMulticodex is `magpie accounts on|off codex
+// --except-multicodex`: the same change for every Codex account magpie did
+// not get from multicodex's profiles — the machine's own ~/.codex sign-in
+// and any other Codex folder's. A start that keeps only multicodex's
+// accounts turns those off first.
+func loginOnExceptMulticodex(on bool) error {
+	all := provider.Logins("codex")
+	if len(all) == 0 {
+		// nothing is known, so nothing can be told apart: a start must not
+		// go on to serve whatever the machine itself is signed in to
+		return fmt.Errorf("no Codex account is known (is account discovery off?)")
+	}
+	var users []string
+	for _, l := range all {
+		if !provider.CodexUserFromMulticodex(l.User) {
+			users = append(users, l.User)
+		}
+	}
+	if len(users) == 0 {
+		fmt.Println(green.Render("✓"), "every Codex account magpie has is multicodex's; nothing to change")
+		return nil
+	}
+	moved, err := agent.Reseat(func() error {
+		for _, user := range users {
+			if err := provider.SetLoginOn("codex", user, on); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, user := range users {
+		if on {
+			fmt.Println(green.Render("✓"), user, "is in use again")
+		} else {
+			fmt.Println(green.Render("✓"), user, "is out of use")
+		}
+	}
+	printMoved(moved)
+	agent.SyncCatalogSoon()
 	return nil
 }
 

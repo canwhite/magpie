@@ -44,6 +44,16 @@ func TestTakenOverCodexAccountIsMagpiesAlone(t *testing.T) {
 	})
 	ForgetAccounts()
 
+	// the account is multicodex's before it is taken over too, read in
+	// its folder; the machine's own sign-in is not
+	Logins("codex")
+	if !CodexUserFromMulticodex(teamName) {
+		t.Fatalf("%s is not read as multicodex's", teamName)
+	}
+	if CodexUserFromMulticodex("me@example.com") {
+		t.Fatal("the machine's own sign-in is read as multicodex's")
+	}
+
 	taken, err := TakeOverCodexAccounts(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("taking the account over: %v", err)

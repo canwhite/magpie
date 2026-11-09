@@ -102,6 +102,38 @@ func TestSubscriptionsOnAtOnce(t *testing.T) {
 	}
 }
 
+// A pause marks the account the agent is signed in to. Once the sign-in
+// moved to another account the mark is stale: turning the account back on
+// makes it usable again instead of leaving it passed over.
+func TestTurningOnAnAccountClearsAStalePause(t *testing.T) {
+	home := signIn(t)
+	rememberLogins(true)
+	codexSignIn(t, home, "work@example.com", "r-work")
+	rememberLogins(true)
+
+	if err := SetLoginOn("codex", "work@example.com", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetLoginOn("codex", "me@example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := SwitchLogin("codex", "work@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// me@ is no longer the account codex is signed in to
+	if err := SetLoginOn("codex", "me@example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetLoginOn("codex", "me@example.com", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range Logins("codex") {
+		if l.User == "me@example.com" && (!l.On || l.Paused) {
+			t.Fatalf("turned on, still passed over: %+v", l)
+		}
+	}
+}
+
 func TestLoginUsageEachAccount(t *testing.T) {
 	home := signIn(t)
 	rememberLogins(true)

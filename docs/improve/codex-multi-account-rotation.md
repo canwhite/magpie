@@ -229,3 +229,27 @@ magpie 不会切走一个它看不清的账号。
 - 厂商读数：`https://chatgpt.com/backend-api/codex/wham/usage`（magpie 读的
   `/wham/usage`），`primary_window` 是五小时，`secondary_window` 是周
 - 代码：本仓库 `internal/provider`、`internal/appdir`、`internal/cli`
+
+## 9. 启动脚本（2026-11-09）
+
+launchd 服务 `com.yetone.magpie.serve` 已 bootout（plist 仍在，重新登录会回来），
+启动改走仓库 Makefile：
+
+| 目标 | 做什么 |
+| --- | --- |
+| `make serve` | 按账号现状启动网关，前台运行，`SERVE_ADDR`（默认 `0.0.0.0:3425`）可覆盖 |
+| `make serve-multicodex` | 先把非 multicodex 来源的 Codex 账号停用，再启动；只留 `work1`–`work4` 参与路由和轮换 |
+| `make codex-own-on` | 把非 multicodex 的账号重新启用 |
+| `make close` | 停掉 `SERVE_ADDR` 上的网关（先 TERM，10 秒不退再 KILL），并 bootout launchd 服务 |
+
+“是不是 multicodex 的账号”由 `provider.CodexUserFromMulticodex` 判断：账号的
+`taken`/`home` 落在 `~/multicodex/config.json` 的 profile 目录里就是。**不能拿
+`~/.codex/auth.json` 当前是谁来判断**——轮换会把登录切到 workN，下次启动就会误停
+一个团队账号。命令行入口是 `magpie accounts on|off codex --except-multicodex`。
+
+局域网 key `LAN clients`（`a30df9c9462b31f403c37552`）的账号白名单随之从本地账号
+改为四个团队账号的稳定 id，否则本地账号一暂停，LAN 请求会 403。实测：重启后的
+网关由 `doingluning@gmail.com`（work3）服务，本机账号未参与。
+
+注意：`make serve` 不改账号状态，之前停用的本地账号不会自动恢复，要显式
+`make codex-own-on`。

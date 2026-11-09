@@ -32,7 +32,7 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once
+.PHONY: build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve serve-multicodex codex-own-on close
 
 build:
 	go build -tags "$(TAGS)" -trimpath -ldflags="$(LDFLAGS)" -o magpie .
@@ -121,6 +121,43 @@ release-linux:
 
 clean:
 	rm -rf magpie magpie.exe magpie.app dist rsrc_windows_*.syso
+
+# Startup: the gateway this machine serves, in the foreground (Ctrl+C
+# stops it), on SERVE_ADDR as the launchd service ran it. `serve` starts
+# with the accounts as they stand. `serve-multicodex` takes the machine's
+# own Codex accounts out of use first — the ones magpie did not get from
+# multicodex's profiles, paused rather than signed out when one is the
+# sign-in Codex holds — and leaves only multicodex's (`magpie accounts
+# takeover`) in the rotation. The account ~/.codex holds is not the test:
+# magpie switches that sign-in as the accounts turn over, so the accounts
+# are told apart by where they came from. Put them back with
+# `make codex-own-on`.
+SERVE_ADDR ?= 0.0.0.0:3425
+
+serve: cli
+	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+
+serve-multicodex: cli
+	./magpie accounts off codex --except-multicodex
+	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+
+codex-own-on: cli
+	./magpie accounts on codex --except-multicodex
+
+# Stop every magpie service this machine runs: the gateway on SERVE_ADDR
+# (whichever of the starts above brought it up, or a run by hand) and the
+# launchd service when its plist is loaded. The gateway is asked to stop
+# first, and killed if it is still there after ten seconds.
+close:
+	@launchctl bootout gui/$$(id -u)/com.yetone.magpie.serve 2>/dev/null || true
+	@addr=$(SERVE_ADDR); port=$${addr##*:}; \
+	pids=$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null); \
+	if [ -z "$$pids" ]; then echo "  nothing listens on $$port"; else \
+	  kill -TERM $$pids 2>/dev/null || true; \
+	  i=0; while [ $$i -lt 10 ] && [ -n "$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null)" ]; do sleep 1; i=$$((i+1)); done; \
+	  if [ -n "$$(lsof -tiTCP:$$port -sTCP:LISTEN 2>/dev/null)" ]; then kill -KILL $$pids 2>/dev/null || true; fi; \
+	  echo "  gateway on $$port stopped"; \
+	fi
 
 # Development: the UI is served from internal/gui/assets and the window
 # reloads itself when a file there is saved. With fswatch installed, the

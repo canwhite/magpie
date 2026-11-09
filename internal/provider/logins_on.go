@@ -75,6 +75,13 @@ func SetLoginOn(agent, user string, on bool) error {
 	for i := range ls {
 		if ls[i].Agent == agent && strings.EqualFold(ls[i].User, user) {
 			ls[i].On = on
+			if on {
+				// a pause marks the account the agent was signed in to
+				// (above): once it isn't that one any more, the mark is
+				// stale, and turning the account back on must not leave
+				// it passed over
+				ls[i].Paused = false
+			}
 			return writeLogins(ls)
 		}
 	}

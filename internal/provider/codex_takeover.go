@@ -42,6 +42,29 @@ func codexTakenOver(l savedLogin) bool {
 	return l.Agent == "codex" && l.Taken != ""
 }
 
+// CodexUserFromMulticodex says the saved Codex account user is one of
+// multicodex's: taken over from one of its folders (above), or still
+// signed in to in one (codexHomeLogins), which is how an account is read
+// before it is taken over. It is what a start asks to keep the accounts
+// the machine's own Codex holds out of the rotation.
+func CodexUserFromMulticodex(user string) bool {
+	homes := multicodexHomes()
+	for _, l := range readLogins() {
+		if l.Agent != "codex" || !strings.EqualFold(l.User, user) {
+			continue
+		}
+		if codexTakenOver(l) {
+			return true
+		}
+		for dir := range homes {
+			if samePath(dir, l.Home) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // TakeOverCodexAccounts takes the ChatGPT accounts multicodex holds into
 // magpie: each profile's sign-in is read, kept in logins.json and
 // refreshed there from then on. The accounts the user named, or all of
