@@ -159,29 +159,37 @@ clean: ## remove built binaries and bundles
 # `hybrid` both groups together.
 SERVE_ADDR ?= 0.0.0.0:3425
 
+# The shares the gateway moves its requests at, from the same .env as the
+# groups below. They are handed to `magpie serve` as the environment, which
+# wins over ~/.config/magpie/.env, so a start from here follows this file.
+# A magpie started any other way reads only ~/.config/magpie/.env.
+MAGPIE_SWITCH_LEFT ?= 15
+MAGPIE_SWITCH_LEFT_LONG ?= 2
+SWITCH_SHARES = MAGPIE_SWITCH_LEFT=$(MAGPIE_SWITCH_LEFT) MAGPIE_SWITCH_LEFT_LONG=$(MAGPIE_SWITCH_LEFT_LONG)
+
 # Each group is a list of names magpie keeps the accounts under, set in
 # .env: MULTICODEX_ACCOUNTS holds multicodex's four profiles' accounts and
 # MACHINE_ACCOUNT the machine's own account from before.
 serve: cli ## run the gateway in the foreground (SERVE_ADDR, default 0.0.0.0:3425)
-	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+	$(SWITCH_SHARES) MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
 multicodex: cli ## run the gateway with multicodex's four accounts in use
 	@test -n "$(strip $(MULTICODEX_ACCOUNTS))" || { echo "  MULTICODEX_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
 	@for u in $(MULTICODEX_ACCOUNTS); do ./magpie accounts on codex "$$u" || exit 1; done
 	@./magpie accounts off codex "$(MACHINE_ACCOUNT)"
-	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+	$(SWITCH_SHARES) MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
 big-account: cli ## run the gateway with the machine's own account in use
 	@test -n "$(strip $(MACHINE_ACCOUNT))" || { echo "  MACHINE_ACCOUNT is empty: set it in .env" >&2; exit 1; }
 	@./magpie accounts on codex "$(MACHINE_ACCOUNT)"
 	@for u in $(MULTICODEX_ACCOUNTS); do ./magpie accounts off codex "$$u" || exit 1; done
-	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+	$(SWITCH_SHARES) MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
 hybrid: cli ## run the gateway with both account groups in use
 	@test -n "$(strip $(MULTICODEX_ACCOUNTS))" || { echo "  MULTICODEX_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
 	@test -n "$(strip $(MACHINE_ACCOUNT))" || { echo "  MACHINE_ACCOUNT is empty: set it in .env" >&2; exit 1; }
 	@for u in $(MULTICODEX_ACCOUNTS) $(MACHINE_ACCOUNT); do ./magpie accounts on codex "$$u" || exit 1; done
-	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+	$(SWITCH_SHARES) MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
 # A gateway key's own limits. The key is GATEWAY_KEY, set in .env. The
 # window a limit sits in is named the way the CLI names it: day, week,
