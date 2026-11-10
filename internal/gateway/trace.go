@@ -250,6 +250,10 @@ type Weighed struct {
 	Known    bool    `json:"known,omitempty"`  // the vendor said what the account has left
 	Learns   bool    `json:"learns,omitempty"` // not known, but its answer will tell
 	Used     float64 `json:"used"`             // share of the allowance counting the model, used
+	// Switched: the account's own window reached the share left the user
+	// told in .env, so its requests go to another account of the pool
+	// while one is under that share
+	Switched bool `json:"switched,omitempty"`
 	// Amount of Limit in Unit: the count that share is of, when the
 	// vendor counts it so (WorkBuddy's credits, #659)
 	Amount   float64           `json:"amount,omitempty"`
@@ -442,7 +446,7 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 		w.Kind = "provider"
 	}
 	if l, ok := wg.lefts[c.allowanceKey()]; ok {
-		w.Known, w.Used, w.Renews, w.Pace, w.Credits = true, l.used, l.renews, l.pace, l.credits
+		w.Known, w.Used, w.Renews, w.Pace, w.Credits, w.Switched = true, l.used, l.renews, l.pace, l.credits, l.switched
 		if !l.fullest.IsZero() {
 			ur := l.fullest
 			w.UsedRenews = &ur

@@ -1326,6 +1326,8 @@ func serve() error {
 	fmt.Println(muted.Render("  OpenAI  "), public+"/v1/chat/completions", muted.Render("·"), public+"/v1/responses")
 	fmt.Println(muted.Render("  Anthropic"), public+"/v1/messages")
 	fmt.Println(muted.Render("  key     "), gateway.Token, muted.Render(keyNote()))
+	fmt.Println(muted.Render("  switch  "), fmt.Sprintf("%g%% of a rolling window, %g%% of a long one, left when the sign-in or the requests move off an account · %s",
+		provider.SwitchLeftRolling(), provider.SwitchLeftLong(), provider.SwitchLeftPath()))
 	if l := tlsLine(); l != "" {
 		fmt.Println(l)
 	}

@@ -475,11 +475,11 @@ function routingPage(part) {
   const tryOk = (tr) => tr.status < 400 && !tr.fail;
   const API = { anthropic: "Anthropic", chat: "OpenAI", responses: "OpenAI Responses", gemini: "Gemini" };
   const MODES = {
-    "": ["Smart", "Smart: of the accounts with quota to spare, the one whose allowance renews soonest goes first — what it has left would be lost at the reset. The week decides; an account with five hours and no week goes by its five hours. One at 90% or more waits until the others can't answer; one resting after a failure goes last."],
+    "": ["Smart", "Smart: of the accounts with quota to spare, the one whose allowance renews soonest goes first — what it has left would be lost at the reset. The week decides; an account with five hours and no week goes by its five hours. One at 90% or more, or past its switch line (85% used by default), waits until the others can't answer; one resting after a failure goes last."],
     order: ["In order", "In order: the first answers everything until it can't; then the next."],
     rotate: ["In turn", "In turn: each conversation's next turn goes to the account after the one that answered its last, and a new conversation starts one further along; the requests within a turn stay put, keeping the prompt cache."],
     usage: ["Least used", "Least used first: the account with the most of its allowance left goes first; a key by the tokens magpie sent it lately."],
-    pace: ["Weekly pace", "Weekly pace: the account with the most of its week left per hour until it renews goes first — the one with the most to lose at its reset; an account with five hours and no week by what its five hours have left per hour. One at 90% or more waits until the others can't answer; a key by the tokens magpie sent it lately."],
+    pace: ["Weekly pace", "Weekly pace: the account with the most of its week left per hour until it renews goes first — the one with the most to lose at its reset; an account with five hours and no week by what its five hours have left per hour. One at 90% or more, or past its switch line (85% used by default), waits until the others can't answer; a key by the tokens magpie sent it lately."],
     manual: ["Manual", "Manual: every request goes to the model picked on the group's card, over its own accounts or keys."],
     // the provider's key routing (#841); both strings as the provider
     // editor's routing options say them (app.js ROUTINGS), so every
@@ -531,7 +531,9 @@ function routingPage(part) {
   // noURLWord: its keys are all set to a protocol its provider has no URL
   // for, so it went out on the URLs it has (#1702)
   const noURLWord = (w) => t("key set to {api} only, no {api} URL · sent on the others", { api: API[w.noURL] || w.noURL });
-  const group = (w) => w.used >= 98 ? "spent" : w.used >= 90 ? "low" : "fine";
+  // switched: the account's own window reached the share left the user
+  // told in magpie's .env, though the model's own share may be far below
+  const group = (w) => w.used >= 98 ? "spent" : w.switched || w.used >= 90 ? "low" : "fine";
   const renews = (w) => (w.renews || []).map((s) => known0(s) ? at(s) : 0);
   // usedRenews is when the window w.used is the share of renews: a row
   // says the two together, so they are of one window, a Factory account's
@@ -701,8 +703,8 @@ function routingPage(part) {
     if (!f.known && !peers.some((p) => p.known)) return t("The vendor hasn't said yet what these accounts have left, so they go in their order: {who} first.", { who: w });
     if (group(f) === "spent" && f.credits) return t("Every account is all but used up, so {who} goes first: it goes on on its credits, which the vendor spends once its allowance is used up.", { who: w });
     if (group(f) !== "fine") return r.order.some((x) => x.kind !== "account" && x.known)
-      ? t("Every key and account here is at 90% or more of its allowance, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) })
-      : t("Every account is at 90% or more of its allowance, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) });
+      ? t("Every key and account here has reached its switch line or is at 90% or more, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) })
+      : t("Every account here has reached its switch line or is at 90% or more, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) });
     const next = peers.find((p) => p.known && group(p) === "fine");
     const soon = renewsBy(f).find(Boolean);
     if (!next) return t("{who} goes first: it has quota to spare, and the others are kept for last.", { who: w });
@@ -828,6 +830,7 @@ function routingPage(part) {
     if (lead) return null;
     switch (a.why) {
       case "resting": return t("{who} answered this conversation last, but it is resting, so the conversation moves.", { who: last });
+      case "switched": return t("{who} answered this conversation last, but its own window has reached the share left you set, and another account has room, so the conversation moves.", { who: last });
       case "spent": return t("{who} answered this conversation last, but its allowance is all but used up, so the conversation moves.", { who: last });
       case "gone": return t("{who} answered this conversation last, but it is no longer one to route to.", { who: last });
       case "no-cache": return t("{who} answered this conversation last, but the vendor then read only {r} tokens of it from its cache and wrote {w} — not worth staying for.", { who: last, r: tokens(a.cacheRead || 0), w: tokens(a.cacheWrite || 0) });
@@ -2189,7 +2192,7 @@ function routingPage(part) {
         const soon = usedRenews(w);
         s = !w.routing && w.used >= 98 && w.credits ? quota(w, "{n} used · on credits", "{n} left · on credits")
           : !w.routing && w.used >= 98 ? quota(w, "{n} used · all but used up", "{n} left · all but used up")
-          : !w.routing && w.used >= 90 ? quota(w, "{n} used · kept for last", "{n} left · kept for last")
+          : group(w) !== "fine" ? quota(w, "{n} used · kept for last", "{n} left · kept for last")
           : soon ? quota(w, "{n} used · renews in {d}", "{n} left · renews in {d}", { d: dur(soon - n) }) : quota(w, "{n} used", "{n} left");
       } else if (w.kind === "account") s = t("what's left not known yet");
       else if (w.routing === "usage") s = t("{n} tokens lately", { n: tokens(w.tokens || 0) });
@@ -2213,7 +2216,7 @@ function routingPage(part) {
       const flying = !resting && (trying.has(id) || onWire.has(id));
       const on = flying || (!resting && answered.has(id));
       lightRow(row.li, row.wire, on, flying);
-      row.li.classList.toggle("low", !!(!w.routing && w.known && w.used >= 90));
+      row.li.classList.toggle("low", !!(!w.routing && w.known && group(w) !== "fine"));
       row.li.classList.toggle("rest", !!resting || gave.has(id));
       row.li.classList.toggle("left", !!w.unlisted);
       if (on) row.wire.style.setProperty("--agent", hueOf(r.agent));

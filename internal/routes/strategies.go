@@ -11,17 +11,29 @@ import (
 // Shares of an allowance past which an account is kept for when the others
 // can't take a request: low, and all but used up — where the agent signed
 // in to it is signed in to another, too (provider.SpentShare).
+//
+// LowShare is where a seat this full goes behind the others; a
+// subscription's own line is usually lower, the user's in .env
+// (provider.SwitchShareReached), and reaches the gateway as Seat.Switched.
 const (
 	LowShare  = 90
 	UsedShare = provider.SpentShare
 )
 
-// tier is 0 for a share with room, 1 for low, 2 for all but used up.
-func tier(share float64) int {
+// tier is 0 for a seat with room, 1 for one past its line, 2 for one all
+// but used up.
+//
+// A subscription past the share the user told for its window is kept for
+// when the others can't take a request, as one at LowShare is; a key is
+// read as it always was, since the share is the user's for subscriptions
+// alone.
+func tier(s Seat) int {
 	switch {
-	case share >= UsedShare:
+	case s.Used >= UsedShare:
 		return 2
-	case share >= LowShare:
+	case s.Switched:
+		return 1
+	case s.Used >= LowShare:
 		return 1
 	}
 	return 0
@@ -58,7 +70,7 @@ func identity(n int) []int {
 var Smart = Strategy{Order: func(_ string, seats []Seat) []int {
 	var fine, low, spent []int
 	for i, s := range seats {
-		switch tier(s.Used) {
+		switch tier(s) {
 		case 2:
 			spent = append(spent, i)
 		case 1:
@@ -131,7 +143,7 @@ var LeastUsed = Strategy{ByUse: true, Order: func(_ string, seats []Seat) []int 
 	idx := identity(len(seats))
 	sort.SliceStable(idx, func(a, b int) bool {
 		sa, sb := seats[idx[a]], seats[idx[b]]
-		if ta, tb := tier(sa.Used), tier(sb.Used); ta == 2 && tb == 2 && sa.Credits != sb.Credits {
+		if ta, tb := tier(sa), tier(sb); ta == 2 && tb == 2 && sa.Credits != sb.Credits {
 			return sa.Credits
 		}
 		if sa.Used != sb.Used {
@@ -169,7 +181,7 @@ var Pace = Strategy{ByUse: true, Order: func(_ string, seats []Seat) []int {
 	// band's top and part two alike behind it
 	var byPace []int
 	for i, s := range seats {
-		if tier(s.Used) == 0 && !s.Learns {
+		if tier(s) == 0 && !s.Learns {
 			byPace = append(byPace, i)
 		}
 	}
@@ -189,7 +201,7 @@ var Pace = Strategy{ByUse: true, Order: func(_ string, seats []Seat) []int {
 	idx := identity(len(seats))
 	sort.SliceStable(idx, func(a, b int) bool {
 		sa, sb := seats[idx[a]], seats[idx[b]]
-		if ta, tb := tier(sa.Used), tier(sb.Used); ta != tb {
+		if ta, tb := tier(sa), tier(sb); ta != tb {
 			return ta < tb
 		} else if ta == 2 && sa.Credits != sb.Credits {
 			return sa.Credits

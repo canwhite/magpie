@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"regexp"
@@ -1434,6 +1435,40 @@ func route(p provider.Provider, cs []candidate, model string, from provider.Prot
 	return cs
 }
 
+// switchedNotes: the last move told per provider, so a routing that goes
+// back and forth does not say the same move every request.
+var switchedNotes = struct {
+	sync.Mutex
+	m map[string]string
+}{m: map[string]string{}}
+
+// noteSwitched logs a pool whose head left for an account under the share
+// left the user told, once per move, not once per request: the head stays
+// while the routing keeps it.
+func noteSwitched(p provider.Provider, first, firstWho string, cs []candidate, seats []routes.Seat, order []int) {
+	if p.Account == nil || len(order) == 0 || first == cs[0].rest {
+		return
+	}
+	head := seats[order[0]]
+	if head.Switched {
+		return
+	}
+	for _, s := range seats {
+		if s.Key != first || !s.Switched {
+			continue
+		}
+		to := cs[0].who()
+		switchedNotes.Lock()
+		said := switchedNotes.m[p.ID] == first+" to "+to
+		switchedNotes.m[p.ID] = first + " to " + to
+		switchedNotes.Unlock()
+		if !said {
+			log.Printf("gateway: %s moved from %s, past its switch line, to %s", p.ID, firstWho, to)
+		}
+		return
+	}
+}
+
 // weighing is what one provider's candidates were ordered by: the share of
 // its allowance each account has used and when that renews, and the tokens
 // each served lately. The routing trace shows the same.
@@ -1476,6 +1511,10 @@ type left struct {
 	// credits: a Codex account that goes on on its credits once its
 	// allowance is used up (spendsCredits)
 	credits bool
+	// switched: the account's own window reached the share left the user
+	// told (provider.SwitchShareReached); its requests go to another
+	// account of the pool while one is under it
+	switched bool
 }
 
 // learns: c is a subscription whose allowance isn't known yet, of an agent
@@ -1531,12 +1570,13 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 	for _, c := range cs {
 		var a provider.Allowance
 		var ok bool
+		ag := ""
 		if c.p.Account == nil {
 			// a key that reads its own windows is weighed by them as an
 			// account is; any other key isn't known
 			a, ok = keyAllowance(c.p)
 		} else {
-			ag := c.p.Account.UsageAgent()
+			ag = c.p.Account.UsageAgent()
 			if _, had := known[ag]; !had {
 				known[ag] = allowances(ag)
 			}
@@ -1547,13 +1587,15 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			pc, due := a.Pace(c.model, now)
 			amt, of, unit := a.Count(c.model, now)
 			rs := a.Restarts(now)
+			switched := ag != "" && provider.SwitchShareReached(ag, a, now)
 			wg.lefts[c.allowanceKey()] = left{used: u, renews: r, fullest: a.Fullest(c.model, now), soon: a.Renewal(c.model, now), pace: pc, due: due, amount: amt, of: of, unit: unit,
-				restarts: rs, dueRestart: !rs.IsZero() && due.Equal(rs), credits: spendsCredits(c.p, a)} // one not known counts as unused
+				restarts: rs, dueRestart: !rs.IsZero() && due.Equal(rs), credits: spendsCredits(c.p, a), switched: switched} // one not known counts as unused
 		}
 	}
 	if len(cs) < 2 {
 		return cs, wg
 	}
+	first, firstWho := cs[0].rest, cs[0].who()
 	// the routing's strategy orders them (internal/routes): Smart, or one
 	// a plugin registered; one not registered leaves them in their order
 	st, ok := routes.Find(p.Routing)
@@ -1569,7 +1611,7 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 			pace = provider.FreshPace
 		}
 		seats[i] = routes.Seat{Key: c.rest, Account: c.p.Account != nil, Known: known, Learns: learns(c, wg.lefts),
-			Used: l.used, Soon: l.soon, Pace: pace, Weight: keyWeight(c), Resting: resting(c), Tokens: routed.used[c.restKey()].now(now), Credits: l.credits}
+			Used: l.used, Switched: l.switched, Soon: l.soon, Pace: pace, Weight: keyWeight(c), Resting: resting(c), Tokens: routed.used[c.restKey()].now(now), Credits: l.credits}
 	}
 	routed.Unlock()
 	if st.ByUse {
@@ -1593,6 +1635,7 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 		out = append(out, cs[i])
 	}
 	cs = out
+	noteSwitched(p, first, firstWho, cs, seats, order)
 	if st.Exact {
 		return cs, wg
 	}

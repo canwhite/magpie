@@ -78,7 +78,9 @@ type Affinity struct {
 	// (nobody has answered it yet), "new-turn", "no-cache" (the vendor
 	// read and wrote too little of its cache to keep, or was sent too
 	// little for a cache it keeps without saying so), "cold" (too long
-	// ago), "resting", "spent", "gone" (no longer one to route to).
+	// ago), "resting", "switched" (past the share left the user told, with
+	// another account under it), "spent", "gone" (no longer one to route
+	// to).
 	Why string `json:"why"`
 }
 
@@ -425,6 +427,19 @@ func strictKeep(scope, mode string, in http.Header, body []byte, cs []candidate,
 	return cs, pl, nil
 }
 
+// switchedElsewhere says whether another seat of order — not at — is under
+// the share left the user told, and isn't resting: the conversation can
+// move there. When every one is past it, there is nowhere better to be,
+// and it stays where its cache is.
+func switchedElsewhere(order []Weighed, at int) bool {
+	for i, w := range order {
+		if i != at && w.Known && !w.Switched && w.Rest == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // strictOnly leaves of cs, for a conversation kept strictly, the key or
 // account cs[at] alone: first as it answered, then its other models a
 // group has on it, which a rule may still pick between. Nobody else is
@@ -520,6 +535,10 @@ func affine(scope, mode string, rotate bool, in http.Header, from provider.Proto
 		a.Why = "strict"
 	case pl.order[at].Rest != nil:
 		a.Why = "resting"
+	case at > 0 && pl.order[at].Switched && switchedElsewhere(pl.order, at):
+		// past the share left the user told, and another account of the
+		// pool is under it: the requests move, prompt cache or not
+		a.Why = "switched"
 	case at > 0 && pl.order[at].Known && pl.order[at].Used >= provider.SpentShareOf(cs[at].p.Routing):
 		// all but used up, and put behind another: first still — the
 		// one key or account it has (#1016), or every one used up — it

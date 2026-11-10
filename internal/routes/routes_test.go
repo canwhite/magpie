@@ -79,6 +79,34 @@ func TestSmart(t *testing.T) {
 	}
 }
 
+// A subscription past the share the user told goes behind every seat with
+// room, ahead of one all but used up: the gateway's request switch.
+func TestSwitchedSeatsGoAfterThoseWithRoom(t *testing.T) {
+	s := []Seat{
+		{Key: "switched", Account: true, Used: 86, Switched: true},
+		{Key: "room", Account: true, Used: 10},
+		{Key: "spent", Account: true, Used: 99},
+	}
+	for _, c := range []struct {
+		name string
+		st   Strategy
+	}{
+		{"smart", Smart},
+		{"least used", LeastUsed},
+		{"pace", Pace},
+	} {
+		if got := keys(s, Apply(c.st, "p", s)); !slices.Equal(got, []string{"room", "switched", "spent"}) {
+			t.Errorf("%s: %v, want room, switched, spent", c.name, got)
+		}
+	}
+	// A key is not read by the share, which is the user's for
+	// subscriptions: at 92% it is still the old LowShare's.
+	keysOnly := []Seat{{Key: "key", Used: 92}, {Key: "room", Account: true, Used: 10}}
+	if got := keys(keysOnly, Apply(Smart, "p", keysOnly)); !slices.Equal(got, []string{"room", "key"}) {
+		t.Errorf("keys at 92%%: %v, want room, key", got)
+	}
+}
+
 func keys(s []Seat, order []int) []string {
 	out := make([]string, len(order))
 	for i, j := range order {

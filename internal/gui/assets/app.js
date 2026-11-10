@@ -11925,7 +11925,7 @@ function renderRouting(p) {
       : p.keepLogin
       ? t("Routing picks the account for each request through magpie; {agent} on its own stays signed in to the first account, whatever it has left.", { agent: a.agentName })
       : a.agent === "codex" || a.agent === "claude"
-        ? t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have {left}% left, and back to the first once that has room again.", { agent: a.agentName, left: switchLeft })
+        ? t("Routing picks the account for each request through magpie, moving a request to another account once the one it would use has {left}% of its rolling window left while another has room; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once its five hours have {left}% left, and back to the first once that has room again.", { agent: a.agentName, left: switchLeft })
         : routing === "order"
         ? t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is used up, and back to the first once that has room again.", { agent: a.agentName })
         : t("Routing picks the account for each request through magpie; {agent} on its own uses the one it is signed in to, which magpie moves to the next ticked account with room once it is 98% used, and back to the first once that has room again.", { agent: a.agentName }));

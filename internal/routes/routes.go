@@ -31,6 +31,11 @@ type Seat struct {
 	Learns bool
 	// Used is the share of its allowance used that counts the model, 0–100
 	Used float64
+	// Switched: a subscription whose own window — the account's, not one
+	// model's — has reached the share left the user told in .env
+	// (provider.SwitchShareReached). Its requests go to another account of
+	// the pool while one is under that share. A key is never.
+	Switched bool
 	// Soon is when its windows renew, the biggest first (Allowance.Renewal)
 	Soon []time.Time
 	// Pace is its week left per hour until that renews; an account not

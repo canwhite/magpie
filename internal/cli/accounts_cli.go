@@ -1103,17 +1103,20 @@ func orderAccounts(args []string) error {
 
 // switchLeftAccounts: `magpie accounts switch-left [<share>] [rolling|long]`
 // says the share of an account's window left when the sign-in moves off
-// it, and with a share told it sets it.
+// it, and with a share told it sets it. The gateway's requests move off an
+// account at the same share, while another account of its pool has room.
 //
 // The share is the user's, so it is kept in the .env beside magpie's own
 // files (provider.SetSwitchLeft), where they can change it themselves.
 func switchLeftAccounts(args []string) error {
 	if len(args) == 1 && args[0] == "--help" {
 		fmt.Println("usage: magpie accounts switch-left [<share>] [rolling|long]")
-		fmt.Println("The share of an account's window left when the sign-in moves off it.")
-		fmt.Println("A rolling window (Codex's and Claude Code's five hours) moves early, so the")
-		fmt.Println("next account has a window's worth of room; a long one (a week, a month)")
-		fmt.Println("is scarce and is held until it is nearly spent.")
+		fmt.Println("The share of an account's window left when the sign-in moves off it,")
+		fmt.Println("and when the gateway moves its requests off it while another account")
+		fmt.Println("of the pool has room. A rolling window (Codex's and Claude Code's five")
+		fmt.Println("hours) moves early, so the next account has a window's worth of room;")
+		fmt.Println("a long one (a week, a month) is scarce and is held until it is nearly")
+		fmt.Println("spent.")
 		return nil
 	}
 	kind := "rolling"
@@ -1133,6 +1136,7 @@ func switchLeftAccounts(args []string) error {
 			fmt.Printf("a rolling window (five hours): %g%% left\n", rolling)
 			fmt.Printf("a long window (a week, a month): %g%% left\n", long)
 		}
+		fmt.Println(muted.Render("  the sign-in and the gateway's requests both move at it"))
 		fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath()))
 		return nil
 	}
@@ -1143,7 +1147,7 @@ func switchLeftAccounts(args []string) error {
 	if err := provider.SetSwitchLeft(kind, share); err != nil {
 		return err
 	}
-	fmt.Println(green.Render("✓"), "the sign-in now moves off an account with", share, "% of its", kind, "window left")
+	fmt.Println(green.Render("✓"), "the sign-in and the gateway's requests now move off an account with", share, "% of its", kind, "window left")
 	fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath() + " · it takes effect at the next look"))
 	return nil
 }

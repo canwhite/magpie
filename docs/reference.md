@@ -1590,21 +1590,26 @@ result for every request: who went first, and why.
     without reporting it (OpenAI's automatic prefix cache, Gemini) is taken
     to have written what it was sent. This
    never brings back an account that is resting, nor one that has used 98%
-   of a window (100% In order). *Stays: Strict* does, and asks no other:
+   of a window (100% In order), nor one past its switch line (85% of the
+   five hours used by default) while another account is under it. *Stays: Strict* does, and asks no other:
    the conversation stays on its account, resting, spent or past its cap,
    and its errors go to the agent.
 
 So routing decides who goes first only for a conversation nobody has
-answered yet. An account that has used 90% goes behind the others for new
-conversations, but a conversation already on it stays there until 98%.
+answered yet. A subscription past its switch line (85% used by default)
+goes behind the others for new conversations, and a conversation already
+on it moves to an account under the line. A key at 90% goes behind the
+others, but a conversation already on it stays there until 98%.
 
 **The routings.** Smart, Least used first and Weekly pace go by the share
 used of the fullest window that counts the model, the 5-hour window
-included. Smart and Weekly pace put an account behind the others once a
-window is at 90% or more, and behind those once one is at 98% or more,
-each of these groups ordered by the share used.
+included. Smart, Least used first and Weekly pace put a subscription behind the
+others once its own window has reached the switch line (85% used of the
+five hours by default, from magpie's `.env`), and a key once a window is
+at 90% or more; behind those once one is at 98% or more, each of these
+groups ordered by the share used.
 
-- **Smart** (the default): of the accounts under 90%, the one whose
+- **Smart** (the default): of the accounts under the switch line, the one whose
   allowance renews soonest goes first, because what it has left is lost at
   the reset. The biggest window decides: the week, then the 5 hours only
   when the weeks renew in the same hour. Reset times are compared to the
@@ -1618,7 +1623,8 @@ each of these groups ordered by the share used.
   since they end at the same midnight on every account. A Claude account
   magpie knows nothing of yet goes first once, to learn what it has left
   from the answer; any other unknown account goes after those known,
-  and is still tried when they fail, ahead of any at 90% or more.
+  and is still tried when they fail, ahead of any past the line or at 98%
+  or more.
   An account with a month beside its week (Factory) goes by its month:
   when the month holds less than its weeks add up to (Factory's, by
   one user's readings, about two weeks' worth), what a week leaves isn't
