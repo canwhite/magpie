@@ -7,6 +7,11 @@ ifneq ($(shell sed -n 's/^module //p' go.mod 2>/dev/null),github.com/yetone/magp
   $(error run make in magpie's folder (make -C path/to/magpie), not in $(CURDIR))
 endif
 
+# The accounts and gateway key this machine's targets act on are not in
+# this file: they are in .env, which git ignores, so no address is
+# committed. The targets that need one say which is unset.
+-include .env
+
 # A tag may hold $, ( or `, which the shell lines below would run: the
 # version keeps only what a version is spelled with.
 VERSION ?= $(or $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9._+-'),dev)
@@ -32,7 +37,7 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve serve-multicodex codex-own-on close
+.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key
 
 # The targets this file offers. Each line below ends with ## and what the
 # target does, which this prints; a target added without one is left out.
@@ -40,6 +45,20 @@ help: ## list these targets
 	@awk 'BEGIN { print "usage: make <target>"; print ""; print "targets:" } \
 	  /^[a-zA-Z0-9_-]+:.*## / { t = $$0; sub(":.*", "", t); d = $$0; sub("^[^#]*## ", "", d); printf "  %-20s %s\n", t, d }' \
 	  $(MAKEFILE_LIST)
+	@printf '\n%s\n' "gateway key limits:"
+	@printf '  %s\n' \
+	  "make limit-list" \
+	  "        what is left of the 5-hour and weekly limits of GATEWAY_KEY," \
+	  "        and when each window next counts from zero" \
+	  "make limit LIMIT_WINDOW=5h LIMIT_TOKENS=50000000" \
+	  "        set the token limit of one window (5h, week, day, 30d and so on);" \
+	  "        a window that already has a limit is changed, not added to" \
+	  "make limit LIMIT_WINDOW=week LIMIT_TOKENS=500000000" \
+	  "        the weekly ceiling, the way it was raised to 500M" \
+	  "make limit LIMIT_ADD=1 LIMIT_WINDOW=day LIMIT_TOKENS=10000000" \
+	  "        add a limit to a window that has none" \
+	  "make limit GATEWAY_KEY=<id> ..." \
+	  "        the same for another key"
 
 build: ## build magpie with its GUI (native, cgo)
 	go build -tags "$(TAGS)" -trimpath -ldflags="$(LDFLAGS)" -o magpie .
@@ -131,25 +150,60 @@ clean: ## remove built binaries and bundles
 
 # Startup: the gateway this machine serves, in the foreground (Ctrl+C
 # stops it), on SERVE_ADDR as the launchd service ran it. `serve` starts
-# with the accounts as they stand. `serve-multicodex` takes the machine's
-# own Codex accounts out of use first — the ones magpie did not get from
-# multicodex's profiles, paused rather than signed out when one is the
-# sign-in Codex holds — and leaves only multicodex's (`magpie accounts
-# takeover`) in the rotation. The account ~/.codex holds is not the test:
-# magpie switches that sign-in as the accounts turn over, so the accounts
-# are told apart by where they came from. Put them back with
-# `make codex-own-on`.
+# with the accounts as they stand. Every Codex account magpie serves is
+# one it signed in itself, kept in logins.json; a Codex folder's sign-in
+# is the client's, read and never switched, so what ~/.codex holds no
+# longer says which account is in use. The three starts below put one
+# group of magpie's own accounts in use and the rest out, then serve:
+# `multicodex` multicodex's four, `big-account` the machine's own one,
+# `hybrid` both groups together.
 SERVE_ADDR ?= 0.0.0.0:3425
 
+# Each group is a list of names magpie keeps the accounts under, set in
+# .env: MULTICODEX_ACCOUNTS holds multicodex's four profiles' accounts and
+# MACHINE_ACCOUNT the machine's own account from before.
 serve: cli ## run the gateway in the foreground (SERVE_ADDR, default 0.0.0.0:3425)
 	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
-serve-multicodex: cli ## run the gateway with only multicodex's accounts in use
-	./magpie accounts off codex --except-multicodex
+multicodex: cli ## run the gateway with multicodex's four accounts in use
+	@test -n "$(strip $(MULTICODEX_ACCOUNTS))" || { echo "  MULTICODEX_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
+	@for u in $(MULTICODEX_ACCOUNTS); do ./magpie accounts on codex "$$u" || exit 1; done
+	@./magpie accounts off codex "$(MACHINE_ACCOUNT)"
 	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
 
-codex-own-on: cli ## put the machine's own Codex accounts back in use
-	./magpie accounts on codex --except-multicodex
+big-account: cli ## run the gateway with the machine's own account in use
+	@test -n "$(strip $(MACHINE_ACCOUNT))" || { echo "  MACHINE_ACCOUNT is empty: set it in .env" >&2; exit 1; }
+	@./magpie accounts on codex "$(MACHINE_ACCOUNT)"
+	@for u in $(MULTICODEX_ACCOUNTS); do ./magpie accounts off codex "$$u" || exit 1; done
+	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+
+hybrid: cli ## run the gateway with both account groups in use
+	@test -n "$(strip $(MULTICODEX_ACCOUNTS))" || { echo "  MULTICODEX_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
+	@test -n "$(strip $(MACHINE_ACCOUNT))" || { echo "  MACHINE_ACCOUNT is empty: set it in .env" >&2; exit 1; }
+	@for u in $(MULTICODEX_ACCOUNTS) $(MACHINE_ACCOUNT); do ./magpie accounts on codex "$$u" || exit 1; done
+	MAGPIE_ADDR=$(SERVE_ADDR) ./magpie serve
+
+# A gateway key's own limits. The key is GATEWAY_KEY, set in .env. The
+# window a limit sits in is named the way the CLI names it: day, week,
+# month, 5h, 7d and so on. Setting the tokens of a window that already
+# has a limit changes that limit and leaves the others alone, and it
+# does not restart the window: the count so far stays, only the ceiling
+# moves. A window that has no limit yet needs `add` before it
+# (LIMIT_ADD=1).
+LIMIT_WINDOW ?= 5h
+LIMIT_TOKENS ?= 50000000
+
+limit: cli ## set a key's limit (GATEWAY_KEY, LIMIT_WINDOW, LIMIT_TOKENS, LIMIT_ADD=1)
+	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
+	./magpie gateway-key limit $(GATEWAY_KEY) $(if $(LIMIT_ADD),add )$(LIMIT_WINDOW) --tokens $(LIMIT_TOKENS)
+
+limit-list: cli ## show what is left of a key's limits, and when each resets (GATEWAY_KEY)
+	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
+	@build/limit-list.sh ./magpie $(GATEWAY_KEY)
+
+refresh-key: cli ## rotate a gateway key, and print the new one (GATEWAY_KEY)
+	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
+	./magpie gateway-key rotate $(GATEWAY_KEY)
 
 # Stop every magpie service this machine runs: the gateway on SERVE_ADDR
 # (whichever of the starts above brought it up, or a run by hand) and the

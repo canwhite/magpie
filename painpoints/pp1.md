@@ -1,0 +1,1 @@
+仍存的一个风险（不是"profile 不持令牌"，是"两个进程写同一个 auth.json"）：magpie 刷新后令牌轮换，TUI 手里那份旧令牌再去刷新会吃到 refresh_token_reused。codex-rs 有 compare-and-save + 401 后 reload auth 的兜底，通常能自愈；但要加一条：magpie 刷新 profile 令牌前后都重新读盘，不拿内存里的旧值去刷新。
