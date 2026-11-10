@@ -1147,7 +1147,13 @@ func switchLeftAccounts(args []string) error {
 	if err := provider.SetSwitchLeft(kind, share); err != nil {
 		return err
 	}
+	here := ""
+	if ok, err := provider.SetSwitchLeftIn(".env", kind, share); err != nil {
+		here = " · the .env here was not told: " + err.Error()
+	} else if ok {
+		here = " and in ./.env, which make starts read"
+	}
 	fmt.Println(green.Render("✓"), "the sign-in and the gateway's requests now move off an account with", share, "% of its", kind, "window left")
-	fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath() + " · it takes effect at the next look"))
+	fmt.Println(muted.Render("  kept in " + provider.SwitchLeftPath() + here + " · it takes effect at the next look"))
 	return nil
 }

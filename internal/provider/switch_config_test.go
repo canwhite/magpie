@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/yetone/magpie/internal/edit"
 )
 
 // The share the sign-in moves off an account at is the user's: it is told
@@ -103,5 +105,42 @@ func TestSwitchShareNearTheWholeComesBackAtTheSameShare(t *testing.T) {
 	s := shareOf(98)
 	if s.back != 98 {
 		t.Fatalf("the share the account comes back at is %g, want 98", s.back)
+	}
+}
+
+// The project's .env is read by `make serve` and handed to magpie as the
+// environment, which has the last word: a share set with the command is told
+// there too, when that file already names it, so the two do not disagree.
+func TestTheShareSetHereIsToldInTheProjectsEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("GATEWAY_KEY = k\nMAGPIE_SWITCH_LEFT = 15\nMAGPIE_SWITCH_LEFT_LONG = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := SetSwitchLeftIn(path, "rolling", 20)
+	if err != nil || !ok {
+		t.Fatalf("told: %v, %v", ok, err)
+	}
+	if v, _ := edit.GetEnvFile(path, switchLeftRollingEnv); v != "20" {
+		t.Fatalf("the project's .env holds %q, want 20", v)
+	}
+	if v, _ := edit.GetEnvFile(path, switchLeftLongEnv); v != "2" {
+		t.Fatalf("the long share changed to %q", v)
+	}
+	if v, _ := edit.GetEnvFile(path, "GATEWAY_KEY"); v != "k" {
+		t.Fatalf("another key changed to %q", v)
+	}
+
+	// a .env that doesn't name the share is left alone, and isn't given it
+	other := filepath.Join(dir, "other.env")
+	if err := os.WriteFile(other, []byte("GATEWAY_KEY = k\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = SetSwitchLeftIn(other, "rolling", 20)
+	if err != nil || ok {
+		t.Fatalf("told an unrelated .env: %v, %v", ok, err)
+	}
+	if b, _ := os.ReadFile(other); string(b) != "GATEWAY_KEY = k\n" {
+		t.Fatalf("an unrelated .env became %q", b)
 	}
 }

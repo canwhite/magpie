@@ -200,13 +200,9 @@ func SwitchLeftLong() float64 { return currentSwitchConfig().long.left }
 // The share is the user's, so it is told where they can change it: in the
 // file, not in a setting of magpie's own.
 func SetSwitchLeft(kind string, share float64) error {
-	name := switchLeftRollingEnv
-	switch kind {
-	case "rolling", "":
-	case "long":
-		name = switchLeftLongEnv
-	default:
-		return fmt.Errorf("%q isn't a window kind: rolling or long", kind)
+	name, err := switchLeftName(kind)
+	if err != nil {
+		return err
 	}
 	if share < 0 || share > 100 {
 		return fmt.Errorf("a share of a window is between 0 and 100, not %g", share)
@@ -216,6 +212,36 @@ func SetSwitchLeft(kind string, share float64) error {
 		return err
 	}
 	return edit.SetEnvFile(path, edit.KV{Path: name, Value: strconv.FormatFloat(share, 'f', -1, 64)})
+}
+
+// switchLeftName is the variable a window of kind tells its share in.
+func switchLeftName(kind string) (string, error) {
+	switch kind {
+	case "rolling", "":
+		return switchLeftRollingEnv, nil
+	case "long":
+		return switchLeftLongEnv, nil
+	}
+	return "", fmt.Errorf("%q isn't a window kind: rolling or long", kind)
+}
+
+// SetSwitchLeftIn tells the share in the .env at path too, when that file
+// already names it, and says whether it did. A gateway started by `make
+// serve` gets the project's .env in its environment, which has the last
+// word, so a share told beside magpie's own files alone would not reach
+// it. A .env that doesn't name the share is left alone.
+func SetSwitchLeftIn(path, kind string, share float64) (bool, error) {
+	name, err := switchLeftName(kind)
+	if err != nil {
+		return false, err
+	}
+	if share < 0 || share > 100 {
+		return false, fmt.Errorf("a share of a window is between 0 and 100, not %g", share)
+	}
+	if _, ok := edit.GetEnvFile(path, name); !ok {
+		return false, nil
+	}
+	return true, edit.SetEnvFile(path, edit.KV{Path: name, Value: strconv.FormatFloat(share, 'f', -1, 64)})
 }
 
 // SwitchLeftPath is the file the shares are told in, for the command to
