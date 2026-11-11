@@ -37,7 +37,7 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key
+.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key code
 
 # The targets this file offers. Each line below ends with ## and what the
 # target does, which this prints; a target added without one is left out.
@@ -212,6 +212,18 @@ limit-list: cli ## show what is left of a key's limits, and when each resets (GA
 refresh-key: cli ## rotate a gateway key, and print the new one (GATEWAY_KEY)
 	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
 	./magpie gateway-key rotate $(GATEWAY_KEY)
+
+# The "Code" routing group: OpenCode Go's GLM 5.3 Flash first, then
+# MiniMax's M3.1 Flash, with routing=order, so the first model answers
+# until it can't and the next one takes over. An agent picks the group as
+# group/code. The pair is named here so another one needs no edit to the
+# recipe: make code CODE_MODELS="opencode-go/glm-5.3,minimax/MiniMax-M3".
+CODE_MODELS ?= opencode-go/glm-5.3-flash,minimax/MiniMax-M3.1-Flash
+CODE_ROUTING ?= order
+
+code: cli ## make the "Code" routing group (CODE_MODELS, CODE_ROUTING)
+	./magpie group add "Code" models=$(CODE_MODELS) routing=$(CODE_ROUTING)
+	./magpie group code
 
 # Stop every magpie service this machine runs: the gateway on SERVE_ADDR
 # (whichever of the starts above brought it up, or a run by hand) and the
