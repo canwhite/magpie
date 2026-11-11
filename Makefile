@@ -37,7 +37,7 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key code
+.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key key-accounts code
 
 # The targets this file offers. Each line below ends with ## and what the
 # target does, which this prints; a target added without one is left out.
@@ -212,6 +212,20 @@ limit-list: cli ## show what is left of a key's limits, and when each resets (GA
 refresh-key: cli ## rotate a gateway key, and print the new one (GATEWAY_KEY)
 	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
 	./magpie gateway-key rotate $(GATEWAY_KEY)
+
+# The accounts GATEWAY_KEY may spend (#905), set in .env as
+# "<provider>/<account>" entries: one account, by the stable id
+# caller-keys.json keeps, or every account when the list is "all". A key
+# held to a list can use only accounts that are both on and on it, so one
+# list holding every group lets the same key serve whichever group
+# `multicodex`, `big-account` or `hybrid` puts on.
+GATEWAY_KEY_ACCOUNTS ?=
+
+key-accounts: cli ## set GATEWAY_KEY's accounts from .env (GATEWAY_KEY_ACCOUNTS)
+	@test -n "$(strip $(GATEWAY_KEY))" || { echo "  GATEWAY_KEY is empty: set it in .env" >&2; exit 1; }
+	@test -n "$(strip $(GATEWAY_KEY_ACCOUNTS))" || { echo "  GATEWAY_KEY_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
+	./magpie gateway-key accounts $(GATEWAY_KEY) $(GATEWAY_KEY_ACCOUNTS)
+	@./magpie gateway-key accounts $(GATEWAY_KEY)
 
 # The "Code" routing group: OpenCode Go's GLM 5.3 Flash first, then
 # MiniMax's M3.1 Flash, with routing=order, so the first model answers
