@@ -8,3 +8,5 @@
 /magpie-dev.new
 /.code/agents/**/*.txt
 /.env
+/.operation-config/
+/.operation-cache/

@@ -37,7 +37,7 @@ ifeq ($(shell go env GOOS),android)
   TAGS = nogui
 endif
 
-.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key key-accounts code
+.PHONY: help build cli install test test-ui app icons release release-cli release-windows release-linux clean dev dev-once serve multicodex big-account hybrid close limit limit-list refresh-key key-accounts operation-setup operation code
 
 # The targets this file offers. Each line below ends with ## and what the
 # target does, which this prints; a target added without one is left out.
@@ -226,6 +226,32 @@ key-accounts: cli ## set GATEWAY_KEY's accounts from .env (GATEWAY_KEY_ACCOUNTS)
 	@test -n "$(strip $(GATEWAY_KEY_ACCOUNTS))" || { echo "  GATEWAY_KEY_ACCOUNTS is empty: set it in .env" >&2; exit 1; }
 	./magpie gateway-key accounts $(GATEWAY_KEY) $(GATEWAY_KEY_ACCOUNTS)
 	@./magpie gateway-key accounts $(GATEWAY_KEY)
+
+# `operation` is a separate LAN gateway. Its XDG roots keep its provider,
+# caller key and usage out of the gateway on SERVE_ADDR. It discovers no
+# subscription accounts, so only its OpenAI API provider can serve requests.
+OPERATION_ADDR ?= 0.0.0.0:5555
+OPERATION_CONFIG_HOME ?= $(CURDIR)/.operation-config
+OPERATION_CACHE_HOME ?= $(CURDIR)/.operation-cache
+OPERATION_OPENAI_API_KEY ?=
+OPEKEY ?=
+OPERATION_ENV = XDG_CONFIG_HOME="$(OPERATION_CONFIG_HOME)" XDG_CACHE_HOME="$(OPERATION_CACHE_HOME)" MAGPIE_NO_ACCOUNTS=1
+
+operation-setup: cli ## configure isolated OpenAI Luna gateway (OPERATION_OPENAI_API_KEY, OPEKEY)
+	@test -n "$(strip $(OPERATION_OPENAI_API_KEY))" || { echo "  OPERATION_OPENAI_API_KEY is empty: set it in .env" >&2; exit 1; }
+	@test -n "$(strip $(OPEKEY))" || { echo "  OPEKEY is empty: set it in .env" >&2; exit 1; }
+	@mkdir -p "$(OPERATION_CONFIG_HOME)" "$(OPERATION_CACHE_HOME)"
+	@$(OPERATION_ENV) ./magpie provider openai >/dev/null 2>&1 || $(OPERATION_ENV) ./magpie provider add openai "$(OPERATION_OPENAI_API_KEY)" >/dev/null
+	@$(OPERATION_ENV) ./magpie provider key openai "$(OPERATION_OPENAI_API_KEY)" >/dev/null
+	@$(OPERATION_ENV) ./magpie provider models openai gpt-5.6-luna >/dev/null
+	@key_id="$$(OPEKEY="$(OPEKEY)" python3 -c 'import json, os, sys; p=sys.argv[1]; keys=json.load(open(p)) if os.path.exists(p) else []; print(next((key["id"] for key in keys if key.get("secret") == os.environ["OPEKEY"]), ""))' "$(OPERATION_CONFIG_HOME)/magpie/caller-keys.json")"; \
+	if [ -z "$$key_id" ]; then printf '%s\n' "$(OPEKEY)" | $(OPERATION_ENV) ./magpie gateway-key add opekey --key - >/dev/null; \
+	key_id="$$(OPEKEY="$(OPEKEY)" python3 -c 'import json, os, sys; keys=json.load(open(sys.argv[1])); print(next(key["id"] for key in keys if key.get("secret") == os.environ["OPEKEY"]))' "$(OPERATION_CONFIG_HOME)/magpie/caller-keys.json")"; fi; \
+	$(OPERATION_ENV) ./magpie gateway-key models "$$key_id" openai/gpt-5.6-luna >/dev/null; \
+	$(OPERATION_ENV) ./magpie gateway-key models "$$key_id"
+
+operation: operation-setup ## run isolated OpenAI Luna gateway on OPERATION_ADDR (default 0.0.0.0:5555)
+	$(OPERATION_ENV) MAGPIE_ADDR=$(OPERATION_ADDR) ./magpie serve
 
 # The "Code" routing group: OpenCode Go's GLM 5.3 Flash first, then
 # MiniMax's M3.1 Flash, with routing=order, so the first model answers
